@@ -152,7 +152,7 @@ require (
 	k8s.io/apiserver v0.27.9
 	k8s.io/cli-runtime v0.27.9
 	k8s.io/client-go v12.0.0+incompatible
-	k8s.io/gengo v0.0.0-20230306165830-ab3349d207d4
+	k8s.io/gengo v0.0.0-20240110203215-22eea95d1e7a
 	k8s.io/helm v2.16.9+incompatible
 	k8s.io/kube-aggregator v0.27.9
 	k8s.io/kubectl v0.27.9
