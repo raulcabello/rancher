@@ -2,11 +2,13 @@ package fleetworkspace
 
 import (
 	"context"
+	"fmt"
 
 	fleet "github.com/rancher/fleet/pkg/apis/fleet.cattle.io/v1alpha1"
 	mgmt "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/features"
 	mgmtcontrollers "github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io/v3"
+	"github.com/rancher/rancher/pkg/project"
 	"github.com/rancher/rancher/pkg/wrangler"
 	v1 "github.com/rancher/wrangler/pkg/generated/controllers/core/v1"
 	"github.com/rancher/wrangler/pkg/generic"
@@ -26,6 +28,7 @@ type handle struct {
 	workspaceCache mgmtcontrollers.FleetWorkspaceCache
 	namespaceCache v1.NamespaceCache
 	workspaces     mgmtcontrollers.FleetWorkspaceClient
+	projectsCache  mgmtcontrollers.ProjectCache
 }
 
 func Register(ctx context.Context, clients *wrangler.Context) {
@@ -33,6 +36,7 @@ func Register(ctx context.Context, clients *wrangler.Context) {
 		workspaceCache: clients.Mgmt.FleetWorkspace().Cache(),
 		workspaces:     clients.Mgmt.FleetWorkspace(),
 		namespaceCache: clients.Core.Namespace().Cache(),
+		projectsCache:  clients.Mgmt.Project().Cache(),
 	}
 
 	if features.MCM.Enabled() {
@@ -79,12 +83,19 @@ func (h *handle) OnSetting(key string, setting *mgmt.Setting) (*mgmt.Setting, er
 	if value == "" {
 		return setting, nil
 	}
+	project, err := project.GetFleetWorkspacesProject(h.projectsCache)
+	if err != nil {
+		return setting, err
+	}
 
-	_, err := h.workspaceCache.Get(value)
+	_, err = h.workspaceCache.Get(value)
 	if apierror.IsNotFound(err) {
 		_, err = h.workspaces.Create(&mgmt.FleetWorkspace{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: value,
+				Annotations: map[string]string{
+					"field.cattle.io/projectId": fmt.Sprintf("%v:%v", project.Spec.ClusterName, project.Name),
+				},
 			},
 		})
 	}
@@ -97,11 +108,19 @@ func (h *handle) OnChange(workspace *mgmt.FleetWorkspace, status mgmt.FleetWorks
 		return nil, status, nil
 	}
 
+	project, err := project.GetFleetWorkspacesProject(h.projectsCache)
+	if err != nil {
+		return nil, mgmt.FleetWorkspaceStatus{}, err
+	}
+
 	return []runtime.Object{
 		&corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:   workspace.Name,
 				Labels: yaml.CleanAnnotationsForExport(workspace.Labels),
+				Annotations: map[string]string{
+					"field.cattle.io/projectId": fmt.Sprintf("%v:%v", project.Spec.ClusterName, project.Name),
+				},
 			},
 		},
 	}, status, nil

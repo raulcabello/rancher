@@ -8,8 +8,9 @@ import (
 )
 
 const (
-	System  = "System"
-	Default = "Default"
+	System          = "System"
+	Default         = "Default"
+	FleetWorkspaces = "FleetWorkspaces"
 )
 
 const (
@@ -18,7 +19,8 @@ const (
 )
 
 var (
-	SystemProjectLabel = map[string]string{"authz.management.cattle.io/system-project": "true"}
+	SystemProjectLabel          = map[string]string{"authz.management.cattle.io/system-project": "true"}
+	FleetWorkspacesProjectLabel = map[string]string{"authz.management.cattle.io/fleet-workspaces-project": "true"}
 )
 
 func GetSystemProject(clusterName string, projectLister mgmtv3.ProjectLister) (*mgmtv3.Project, error) {
@@ -29,6 +31,19 @@ func GetSystemProject(clusterName string, projectLister mgmtv3.ProjectLister) (*
 
 	if len(projects) == 0 {
 		return nil, errors.New("can't find system project")
+	}
+
+	return projects[0], nil
+}
+
+func GetFleetWorkspacesProject(projectLister mgmtv3.ProjectLister) (*mgmtv3.Project, error) {
+	projects, err := projectLister.List("local", labels.Set(FleetWorkspacesProjectLabel).AsSelector())
+	if err != nil {
+		return nil, errors.Wrapf(err, "list project failed")
+	}
+
+	if len(projects) == 0 {
+		return nil, errors.New("can't find FleetWorkspaces project")
 	}
 
 	return projects[0], nil
