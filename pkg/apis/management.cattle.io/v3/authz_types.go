@@ -168,9 +168,18 @@ type GlobalRole struct {
 	// +optional
 	NamespacedRules map[string][]rbacv1.PolicyRule `json:"namespacedRules,omitempty"`
 
+	// TODO comment
+	// +optional
+	InheritedFleetWorkspacePermissions FleetWorkspacePermission `json:"inheritedFleetWorkspacePermissions,omitempty"`
+
 	// Status is the most recently observed status of the GlobalRole.
 	// +optional
 	Status GlobalRoleStatus `json:"status,omitempty"`
+}
+
+type FleetWorkspacePermission struct {
+	ResourceRules  []rbacv1.PolicyRule `json:"resourceRules,omitempty" yaml:"resourceRules,omitempty"`
+	WorkspaceVerbs []string            `json:"workspaceVerbs,omitempty" yaml:"workspaceVerbs,omitempty"`
 }
 
 // GlobalRoleStatus represents the most recently observed status of the GlobalRole.

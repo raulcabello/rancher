@@ -66,7 +66,7 @@ func Register(ctx context.Context, workload *config.UserContext) {
 	}
 	nsInformer.AddIndexers(nsIndexers)
 
-	// Get ClusterRoles by the namespaces the authorizes because they are in a project
+	// Get clusterRoles by the namespaces the authorizes because they are in a project
 	crInformer := workload.RBAC.ClusterRoles("").Controller().Informer()
 	crIndexers := map[string]cache.IndexFunc{
 		crByNSIndex: crByNS,
@@ -272,7 +272,7 @@ func (m *manager) isClusterOwner(rtName string) (bool, error) {
 		if slice.ContainsString(rule.Resources, "clusters") && slice.ContainsString(rule.Verbs, "own") {
 			return true, nil
 		}
-		// rules with nonResourceURLs can only be applied to ClusterRoles and indicate a RoleTemplate with cluster owner permissions
+		// rules with nonResourceURLs can only be applied to clusterRoles and indicate a RoleTemplate with cluster owner permissions
 		if rule.NonResourceURLs != nil {
 			return true, nil
 		}
