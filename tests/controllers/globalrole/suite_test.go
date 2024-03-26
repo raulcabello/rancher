@@ -10,9 +10,6 @@ import (
 	"github.com/rancher/wrangler/v2/pkg/crd"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
-	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
-	"os"
 	"path/filepath"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
@@ -28,7 +25,6 @@ var (
 	ctx               context.Context
 	testEnv           *envtest.Environment
 	managementContext *config.ManagementContext
-	kubeCfg           string //TODO try to not use it
 )
 
 const (
@@ -57,14 +53,7 @@ var _ = BeforeSuite(func() {
 
 	registerCRDs(restCfg)
 
-	kubeCfg = createKubeconfigFileForRestConfig(restCfg)
-	bytes, err := os.ReadFile(kubeCfg)
-	Expect(err).NotTo(HaveOccurred())
-
-	clientCfg, err := clientcmd.NewClientConfigFromBytes(bytes)
-	Expect(err).NotTo(HaveOccurred())
-
-	wranglerContext, err := wrangler.NewContext(ctx, clientCfg, restCfg)
+	wranglerContext, err := wrangler.NewContext(ctx, nil, restCfg)
 	scaledContext, clusterManager, _, err := multiclustermanager.BuildScaledContext(ctx, wranglerContext, &multiclustermanager.Options{})
 	Expect(err).NotTo(HaveOccurred())
 
@@ -129,35 +118,5 @@ func startCache() {
 
 var _ = AfterSuite(func() {
 	cancel()
-	Expect(os.Remove(kubeCfg)).ToNot(HaveOccurred())
 	Expect(testEnv.Stop()).ToNot(HaveOccurred())
 })
-
-func createKubeconfigFileForRestConfig(restConfig *rest.Config) string {
-	clusters := make(map[string]*clientcmdapi.Cluster)
-	clusters["default-cluster"] = &clientcmdapi.Cluster{
-		Server:                   restConfig.Host,
-		CertificateAuthorityData: restConfig.CAData,
-	}
-	contexts := make(map[string]*clientcmdapi.Context)
-	contexts["default-context"] = &clientcmdapi.Context{
-		Cluster:  "default-cluster",
-		AuthInfo: "default-user",
-	}
-	authinfos := make(map[string]*clientcmdapi.AuthInfo)
-	authinfos["default-user"] = &clientcmdapi.AuthInfo{
-		ClientCertificateData: restConfig.CertData,
-		ClientKeyData:         restConfig.KeyData,
-	}
-	clientConfig := clientcmdapi.Config{
-		Kind:           "Config",
-		APIVersion:     "v1",
-		Clusters:       clusters,
-		Contexts:       contexts,
-		CurrentContext: "default-context",
-		AuthInfos:      authinfos,
-	}
-	kubeConfigFile, _ := os.CreateTemp("", "kubeconfig") //TODO remove?
-	_ = clientcmd.WriteToFile(clientConfig, kubeConfigFile.Name())
-	return kubeConfigFile.Name()
-}
