@@ -64,7 +64,7 @@ func newGlobalRoleBindingLifecycle(management *config.ManagementContext, cluster
 		roleLister:              management.RBAC.Roles("").Controller().Lister(),
 		roleBindings:            management.RBAC.RoleBindings(""),
 		roleBindingLister:       management.RBAC.RoleBindings("").Controller().Lister(),
-		fleetPermissionsHandler: fleetpermissions.NewHandler(management),
+		fleetPermissionsHandler: fleetpermissions.NewBindingHandler(management),
 	}
 }
 
@@ -79,7 +79,7 @@ func crtbGrbOwnerIndexer(crtb *v3.ClusterRoleTemplateBinding) ([]string, error) 
 }
 
 type fleetPermissionsHandler interface {
-	ReconcileFleetWorkspacePermissions(globalRoleBinding *v3.GlobalRoleBinding) error
+	ReconcileFleetWorkspacePermissionsBindings(globalRoleBinding *v3.GlobalRoleBinding) error
 }
 
 type globalRoleBindingLifecycle struct {
@@ -116,7 +116,7 @@ func (grb *globalRoleBindingLifecycle) Create(obj *v3.GlobalRoleBinding) (runtim
 	if err != nil {
 		returnError = multierror.Append(returnError, err)
 	}
-	err = grb.fleetPermissionsHandler.ReconcileFleetWorkspacePermissions(obj)
+	err = grb.fleetPermissionsHandler.ReconcileFleetWorkspacePermissionsBindings(obj)
 	if err != nil {
 		returnError = multierror.Append(returnError, err)
 	}
@@ -137,7 +137,7 @@ func (grb *globalRoleBindingLifecycle) Updated(obj *v3.GlobalRoleBinding) (runti
 	if err != nil {
 		returnError = multierror.Append(returnError, err)
 	}
-	err = grb.fleetPermissionsHandler.ReconcileFleetWorkspacePermissions(obj)
+	err = grb.fleetPermissionsHandler.ReconcileFleetWorkspacePermissionsBindings(obj)
 	if err != nil {
 		returnError = multierror.Append(returnError, err)
 	}
