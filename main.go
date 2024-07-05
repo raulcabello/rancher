@@ -142,7 +142,7 @@ func main() {
 		},
 		cli.IntFlag{
 			Name:        "audit-level",
-			Value:       0,
+			Value:       1,
 			EnvVar:      "AUDIT_LEVEL",
 			Usage:       "Audit log level: 0 - disable audit log, 1 - log event metadata, 2 - log event metadata and request body, 3 - log event metadata, request body and response body",
 			Destination: &config.AuditLevel,

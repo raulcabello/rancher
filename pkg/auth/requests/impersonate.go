@@ -1,8 +1,16 @@
 package requests
 
 import (
+	"context"
 	"errors"
+	"github.com/gorilla/mux"
+	authcontext "github.com/rancher/rancher/pkg/auth/context"
+	"github.com/rancher/rancher/pkg/types/config"
+	v1 "k8s.io/api/authentication/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apiserver/pkg/authentication/serviceaccount"
 	"net/http"
+	"strings"
 
 	"github.com/rancher/rancher/pkg/auth/audit"
 	"github.com/rancher/rancher/pkg/auth/requests/sar"
@@ -13,12 +21,14 @@ import (
 )
 
 type impersonatingAuth struct {
-	sar sar.SubjectAccessReview
+	sar           sar.SubjectAccessReview
+	scaledContext *config.ScaledContext
 }
 
-func NewImpersonatingAuth(sar sar.SubjectAccessReview) auth.Authenticator {
+func NewImpersonatingAuth(sar sar.SubjectAccessReview, scaledContext *config.ScaledContext) auth.Authenticator {
 	return &impersonatingAuth{
-		sar: sar,
+		sar:           sar,
+		scaledContext: scaledContext, //TODO just cluster k8sClient?
 	}
 }
 
@@ -69,6 +79,7 @@ func (h *impersonatingAuth) Authenticate(req *http.Request) (k8sUser.Info, bool,
 		}
 	}
 
+	var extra map[string][]string
 	if impersonateUser || impersonateGroup {
 		if impersonateUser {
 			user = reqUser
@@ -79,9 +90,35 @@ func (h *impersonatingAuth) Authenticate(req *http.Request) (k8sUser.Info, bool,
 			groups = nil
 		}
 		groups = append(groups, k8sUser.AllAuthenticated)
-	}
+		for k, v := range req.Header {
+			if strings.HasPrefix(k, "Impersonate-Extra-") {
+				extra[k] = v
+			}
+		}
 
-	extra := userInfo.GetExtra()
+		if strings.HasPrefix(user, serviceaccount.ServiceAccountUsernamePrefix) {
+			treq := &v1.TokenRequest{
+				Spec: v1.TokenRequestSpec{
+					Audiences: []string{},
+				},
+			}
+			clusterID := mux.Vars(req)["clusterID"]
+			if clusterID == "" {
+				return nil, false, errors.New("clusterID not found")
+			}
+			k8sClient, err := h.scaledContext.Wrangler.MultiClusterManager.K8sClient(clusterID)
+			token, err := k8sClient.CoreV1().ServiceAccounts("test").CreateToken(context.Background(), "issue", treq, metav1.CreateOptions{})
+			if err != nil {
+				return nil, false, err
+			}
+			req.Header.Set("Authorization", "Bearer "+token.Status.Token)
+			req.Header.Del("Impersonate-User")
+			//	req.Header.Del("Impersonate-Group") TODO check impersonating group
+			*req = *req.WithContext(authcontext.SetSAAuthenticated(req.Context()))
+		}
+	} else {
+		extra = userInfo.GetExtra()
+	}
 
 	return &k8sUser.DefaultInfo{
 		Name:   user,
