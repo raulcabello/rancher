@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"fmt"
+	"k8s.io/apiserver/pkg/authentication/serviceaccount"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -240,10 +241,18 @@ func (r *RemoteService) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 			// we need to use an impersonation token.
 			// This is because the impersonator service account does exist on the downstream cluster, and
 			// it has sufficient permissions to perform the TokenReview.
-			token, err := r.getImpersonatorAccountToken(userInfo)
-			if err != nil && !strings.Contains(err.Error(), dialer2.ErrAgentDisconnected.Error()) {
-				er.Error(rw, req, fmt.Errorf("unable to create impersonator account: %w", err))
-				return
+			reqUser := req.Header.Get("Impersonate-User")
+			token := ""
+			if strings.HasPrefix(reqUser, serviceaccount.ServiceAccountUsernamePrefix) {
+				// get token using tokenrequest call
+			} else {
+				//TODO check impersonation headers kept set until the end!!!
+				//TODO if impersonateSA flag is true get SA token using a tokenrequest
+				token, err = r.getImpersonatorAccountToken(userInfo)
+				if err != nil && !strings.Contains(err.Error(), dialer2.ErrAgentDisconnected.Error()) {
+					er.Error(rw, req, fmt.Errorf("unable to create impersonator account: %w", err))
+					return
+				}
 			}
 
 			req.Header.Set("Authorization", "Bearer "+token)

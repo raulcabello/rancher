@@ -2,6 +2,7 @@ package requests
 
 import (
 	"errors"
+	"k8s.io/apiserver/pkg/authentication/serviceaccount"
 	"net/http"
 	"net/url"
 	"strings"
@@ -54,13 +55,19 @@ func (h *impersonatingAuth) Authenticate(req *http.Request) (k8sUser.Info, bool,
 	// impersonate a different user, verify the token user is authz to impersonate
 	if h.sar != nil {
 		if reqUser != "" && reqUser != user {
-			canDo, err := h.sar.UserCanImpersonateUser(req, user, reqUser)
-			if err != nil {
-				return nil, false, err
-			} else if !canDo {
-				return nil, false, errors.New("not allowed to impersonate user")
+			if strings.HasPrefix(reqUser, serviceaccount.ServiceAccountUsernamePrefix) {
+				//check can impersonate SA
+				// if yes set impersonate flag in context to true and impersonateUser = true
+			} else {
+				canDo, err := h.sar.UserCanImpersonateUser(req, user, reqUser)
+				if err != nil {
+					return nil, false, err
+				} else if !canDo {
+					return nil, false, errors.New("not allowed to impersonate user")
+				}
+				// TODO check if user exists in downstream cluster, return error explaining virtual users not supported if doesn't exist.
+				impersonateUser = true
 			}
-			impersonateUser = true
 		}
 
 		if len(reqGroup) > 0 && !groupsEqual(reqGroup, groups) {
