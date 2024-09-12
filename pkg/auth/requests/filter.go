@@ -25,6 +25,7 @@ type authHeaderHandler struct {
 func (h authHeaderHandler) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	userInfo, authed := request.UserFrom(req.Context())
 	// checking for system:cattle:error user keeps the old behavior of always returning 401 when authentication fails
+	// TODO look here!
 	if !authed || userInfo.GetName() == "system:cattle:error" {
 		util.ReturnHTTPError(rw, req, 401, ErrMustAuthenticate.Error())
 		return
