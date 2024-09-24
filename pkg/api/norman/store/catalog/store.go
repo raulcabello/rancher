@@ -157,11 +157,11 @@ func (s *Store) Update(apiContext *types.APIContext, schema *types.Schema, data 
 		return nil, err
 	}
 	if isSystemCatalog {
-		isRestrictedAdmin, err := s.isRestrictedAdmin(apiContext)
+		isAdmin, err := s.isAdmin(apiContext)
 		if err != nil {
 			return nil, err
 		}
-		if strings.ToLower(settings.SystemCatalog.Get()) == "bundled" || isRestrictedAdmin {
+		if strings.ToLower(settings.SystemCatalog.Get()) == "bundled" || !isAdmin {
 			return nil, httperror.NewAPIError(httperror.InvalidBodyContent, fmt.Sprint("not allowed to edit system-library catalog"))
 		}
 	}
@@ -266,7 +266,7 @@ func (s *Store) Update(apiContext *types.APIContext, schema *types.Schema, data 
 	return data, err
 }
 
-func (s *Store) isRestrictedAdmin(apiContext *types.APIContext) (bool, error) {
+func (s *Store) isAdmin(apiContext *types.APIContext) (bool, error) {
 	ma := gaccess.MemberAccess{
 		Users:     s.Users,
 		GrLister:  s.GrLister,
@@ -274,7 +274,7 @@ func (s *Store) isRestrictedAdmin(apiContext *types.APIContext) (bool, error) {
 	}
 	callerID := apiContext.Request.Header.Get(gaccess.ImpersonateUserHeader)
 
-	return ma.IsRestrictedAdmin(callerID)
+	return ma.IsAdmin(callerID)
 }
 
 // isSystemCatalog checks whether the catalog is the the system catalog maintained by rancher
