@@ -270,7 +270,6 @@ func (m *userManager) EnsureClusterToken(clusterName string, input user.TokenInp
 		UserID:        input.UserName,
 		AuthProvider:  input.AuthProvider,
 		UserPrincipal: input.UserPrincipal,
-		IsDerived:     true,
 		Token:         key,
 		ClusterName:   clusterName,
 	}

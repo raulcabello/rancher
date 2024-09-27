@@ -2,10 +2,11 @@ package auth
 
 import (
 	"fmt"
+	"github.com/stretchr/testify/assert"
 	"testing"
 	"time"
 
-	v3 "github.com/rancher/rancher/pkg/generated/norman/management.cattle.io/v3"
+	v3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/generated/norman/management.cattle.io/v3/fakes"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -52,15 +53,37 @@ type crtbTestState struct {
 }
 
 func TestReconcileBindings(t *testing.T) {
+	mockTime := time.Unix(0, 0)
+	timeNow = func() time.Time {
+		return mockTime
+	}
+	defer func() {
+		timeNow = func() time.Time {
+			return time.Now()
+		}
+	}()
 	tests := []struct {
 		name       string
+		crtb       *v3.ClusterRoleTemplateBinding
 		stateSetup func(crtbTestState)
 		wantError  bool
-		crtb       *v3.ClusterRoleTemplateBinding
+		wantStatus v3.ClusterRoleTemplateBindingStatus
 	}{
 		{
 			name: "reconcile crtb with no subject",
 			crtb: noUserCRTB.DeepCopy(),
+			wantStatus: v3.ClusterRoleTemplateBindingStatus{
+				LocalConditions: []v1.Condition{
+					{
+						Type:   bindingExists,
+						Status: v1.ConditionTrue,
+						Reason: bindingExists,
+						LastTransitionTime: v1.Time{
+							Time: mockTime,
+						},
+					},
+				},
+			},
 		},
 		{
 			name: "error getting cluster",
@@ -71,6 +94,19 @@ func TestReconcileBindings(t *testing.T) {
 			},
 			wantError: true,
 			crtb:      defaultCRTB.DeepCopy(),
+			wantStatus: v3.ClusterRoleTemplateBindingStatus{
+				LocalConditions: []v1.Condition{
+					{
+						Type:    bindingExists,
+						Status:  v1.ConditionFalse,
+						Reason:  failedToGetCluster,
+						Message: e.Error(),
+						LastTransitionTime: v1.Time{
+							Time: mockTime,
+						},
+					},
+				},
+			},
 		},
 		{
 			name: "cluster not found",
@@ -81,6 +117,19 @@ func TestReconcileBindings(t *testing.T) {
 			},
 			wantError: true,
 			crtb:      defaultCRTB.DeepCopy(),
+			wantStatus: v3.ClusterRoleTemplateBindingStatus{
+				LocalConditions: []v1.Condition{
+					{
+						Type:    bindingExists,
+						Status:  v1.ConditionFalse,
+						Reason:  clusterNotFound,
+						Message: "cannot create binding because cluster clusterName was not found",
+						LastTransitionTime: v1.Time{
+							Time: mockTime,
+						},
+					},
+				},
+			},
 		},
 		{
 			name: "error in checkReferencedRoles",
@@ -95,6 +144,19 @@ func TestReconcileBindings(t *testing.T) {
 			},
 			wantError: true,
 			crtb:      defaultCRTB.DeepCopy(),
+			wantStatus: v3.ClusterRoleTemplateBindingStatus{
+				LocalConditions: []v1.Condition{
+					{
+						Type:    bindingExists,
+						Status:  v1.ConditionFalse,
+						Reason:  failedToCheckReferencedRole,
+						Message: e.Error(),
+						LastTransitionTime: v1.Time{
+							Time: mockTime,
+						},
+					},
+				},
+			},
 		},
 		{
 			name: "error in ensureClusterMembershipBinding",
@@ -113,6 +175,19 @@ func TestReconcileBindings(t *testing.T) {
 			},
 			wantError: true,
 			crtb:      defaultCRTB.DeepCopy(),
+			wantStatus: v3.ClusterRoleTemplateBindingStatus{
+				LocalConditions: []v1.Condition{
+					{
+						Type:    bindingExists,
+						Status:  v1.ConditionFalse,
+						Reason:  failedToEnsureClusterMembershipBinding,
+						Message: e.Error(),
+						LastTransitionTime: v1.Time{
+							Time: mockTime,
+						},
+					},
+				},
+			},
 		},
 		{
 			name: "error in grantManagementPlanePrivileges",
@@ -133,6 +208,19 @@ func TestReconcileBindings(t *testing.T) {
 			},
 			wantError: true,
 			crtb:      defaultCRTB.DeepCopy(),
+			wantStatus: v3.ClusterRoleTemplateBindingStatus{
+				LocalConditions: []v1.Condition{
+					{
+						Type:    bindingExists,
+						Status:  v1.ConditionFalse,
+						Reason:  failedToGrantManagementPlanePrivileges,
+						Message: e.Error(),
+						LastTransitionTime: v1.Time{
+							Time: mockTime,
+						},
+					},
+				},
+			},
 		},
 		{
 			name: "error listing projects",
@@ -156,9 +244,22 @@ func TestReconcileBindings(t *testing.T) {
 			},
 			wantError: true,
 			crtb:      defaultCRTB.DeepCopy(),
+			wantStatus: v3.ClusterRoleTemplateBindingStatus{
+				LocalConditions: []v1.Condition{
+					{
+						Type:    bindingExists,
+						Status:  v1.ConditionFalse,
+						Reason:  failedToListProjects,
+						Message: e.Error(),
+						LastTransitionTime: v1.Time{
+							Time: mockTime,
+						},
+					},
+				},
+			},
 		},
 		{
-			name: "error listing projects",
+			name: "error granting management cluster scoped privileges in project namespace",
 			stateSetup: func(cts crtbTestState) {
 				cts.clusterListerMock.GetFunc = func(namespace, name string) (*v3.Cluster, error) {
 					c := defaultCluster.DeepCopy()
@@ -184,6 +285,19 @@ func TestReconcileBindings(t *testing.T) {
 			},
 			wantError: true,
 			crtb:      defaultCRTB.DeepCopy(),
+			wantStatus: v3.ClusterRoleTemplateBindingStatus{
+				LocalConditions: []v1.Condition{
+					{
+						Type:    bindingExists,
+						Status:  v1.ConditionFalse,
+						Reason:  failedToGrantManagementClusterScopedPrivilegesInProjectNamespace,
+						Message: e.Error(),
+						LastTransitionTime: v1.Time{
+							Time: mockTime,
+						},
+					},
+				},
+			},
 		},
 		{
 			name: "successfully reconcile clusterowner",
@@ -210,6 +324,18 @@ func TestReconcileBindings(t *testing.T) {
 				}
 			},
 			crtb: defaultCRTB.DeepCopy(),
+			wantStatus: v3.ClusterRoleTemplateBindingStatus{
+				LocalConditions: []v1.Condition{
+					{
+						Type:   bindingExists,
+						Status: v1.ConditionTrue,
+						Reason: bindingExists,
+						LastTransitionTime: v1.Time{
+							Time: mockTime,
+						},
+					},
+				},
+			},
 		},
 		{
 			name: "successfully reconcile clustermember",
@@ -236,6 +362,18 @@ func TestReconcileBindings(t *testing.T) {
 				}
 			},
 			crtb: defaultCRTB.DeepCopy(),
+			wantStatus: v3.ClusterRoleTemplateBindingStatus{
+				LocalConditions: []v1.Condition{
+					{
+						Type:   bindingExists,
+						Status: v1.ConditionTrue,
+						Reason: bindingExists,
+						LastTransitionTime: v1.Time{
+							Time: mockTime,
+						},
+					},
+				},
+			},
 		},
 		{
 			name: "skip projects that are deleting",
@@ -263,6 +401,18 @@ func TestReconcileBindings(t *testing.T) {
 				}
 			},
 			crtb: defaultCRTB.DeepCopy(),
+			wantStatus: v3.ClusterRoleTemplateBindingStatus{
+				LocalConditions: []v1.Condition{
+					{
+						Type:   bindingExists,
+						Status: v1.ConditionTrue,
+						Reason: bindingExists,
+						LastTransitionTime: v1.Time{
+							Time: mockTime,
+						},
+					},
+				},
+			},
 		},
 	}
 
@@ -285,6 +435,8 @@ func TestReconcileBindings(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 			}
+
+			assert.Equal(t, test.wantStatus, test.crtb.Status)
 		})
 	}
 }
