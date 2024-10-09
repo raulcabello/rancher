@@ -2,11 +2,11 @@ package rbac
 
 import (
 	"fmt"
+	rbacv1 "github.com/rancher/rancher/pkg/generated/norman/rbac.authorization.k8s.io/v1"
 
 	"github.com/rancher/norman/types/slice"
 	apisv3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	v3 "github.com/rancher/rancher/pkg/generated/norman/management.cattle.io/v3"
-	rbacv1 "github.com/rancher/rancher/pkg/generated/norman/rbac.authorization.k8s.io/v1"
 	"github.com/rancher/rancher/pkg/rbac"
 	"github.com/rancher/rancher/pkg/types/config"
 	"github.com/sirupsen/logrus"
@@ -97,7 +97,10 @@ func (c *grbHandler) sync(key string, obj *apisv3.GlobalRoleBinding) (runtime.Ob
 // the Kubernetes "cluster-admin" ClusterRole in the downstream cluster.
 func (c *grbHandler) ensureClusterAdminBinding(obj *apisv3.GlobalRoleBinding) error {
 	bindingName := rbac.GrbCRBName(obj)
-	_, err := c.crbLister.Get("", bindingName)
+	crbs, err := c.crbLister.Get("", bindingName)
+	if crbs != nil {
+		fmt.Println(crbs.Name)
+	}
 	if err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("failed to get ClusterRoleBinding '%s' from the cache: %w", bindingName, err)
 	}
