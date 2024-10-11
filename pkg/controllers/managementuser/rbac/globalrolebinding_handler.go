@@ -2,6 +2,11 @@ package rbac
 
 import (
 	"fmt"
+	"github.com/rancher/rancher/pkg/controllers/status"
+	mgmtv3 "github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io/v3"
+	"k8s.io/client-go/util/retry"
+	"reflect"
+	"time"
 
 	"github.com/rancher/norman/types/slice"
 	apisv3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
@@ -18,8 +23,11 @@ import (
 )
 
 const (
-	grbByUserAndRoleIndex = "authz.cluster.cattle.io/grb-by-user-and-role"
-	grbHandlerName        = "grb-cluster-sync"
+	grbByUserAndRoleIndex            = "authz.cluster.cattle.io/grb-by-user-and-role"
+	grbHandlerName                   = "grb-cluster-sync"
+	clusterAdminRoleExists           = "ClusterAdminRoleExists"
+	failedToCreateClusterRoleBinding = "FailedToCreateClusterRoleBinding"
+	failedToGetClusterRoleBinding    = "FailedToGetClusterRoleBinding"
 )
 
 func RegisterIndexers(scaledContext *config.ScaledContext) error {
@@ -61,7 +69,9 @@ func newGlobalRoleBindingHandler(workload *config.UserContext) v3.GlobalRoleBind
 		clusterRoleBindings: workload.RBAC.ClusterRoleBindings(""),
 		crbLister:           workload.RBAC.ClusterRoleBindings("").Controller().Lister(),
 		// The following clients/controllers all point at the management cluster
-		grLister: workload.Management.Management.GlobalRoles("").Controller().Lister(),
+		grLister:  workload.Management.Management.GlobalRoles("").Controller().Lister(),
+		grbLister: workload.Management.Wrangler.Mgmt.GlobalRoleBinding().Cache(),
+		s:         status.NewStatus(),
 	}
 
 	return h.sync
@@ -74,6 +84,9 @@ type grbHandler struct {
 	clusterRoleBindings rbacv1.ClusterRoleBindingInterface
 	crbLister           rbacv1.ClusterRoleBindingLister
 	grLister            v3.GlobalRoleLister
+	grbLister           mgmtv3.GlobalRoleBindingCache
+	grbClient           mgmtv3.GlobalRoleBindingController
+	s                   *status.Status
 }
 
 func (c *grbHandler) sync(key string, obj *apisv3.GlobalRoleBinding) (runtime.Object, error) {
@@ -85,25 +98,35 @@ func (c *grbHandler) sync(key string, obj *apisv3.GlobalRoleBinding) (runtime.Ob
 		return nil, err
 	}
 	if !isAdmin {
+		err := c.updateStatus(obj)
+		if err != nil {
+			return nil, err
+		}
 		return obj, nil
 	}
 
 	logrus.Debugf("%v is an admin role", obj.GlobalRoleName)
+	if err := c.ensureClusterAdminBinding(obj); err != nil {
+		return nil, err
+	}
 
-	return obj, c.ensureClusterAdminBinding(obj)
+	return obj, c.updateStatus(obj)
 }
 
 // ensureClusterAdminBinding creates a ClusterRoleBinding for GRB subject to
 // the Kubernetes "cluster-admin" ClusterRole in the downstream cluster.
 func (c *grbHandler) ensureClusterAdminBinding(obj *apisv3.GlobalRoleBinding) error {
+	condition := metav1.Condition{Type: clusterAdminRoleExists}
 	bindingName := rbac.GrbCRBName(obj)
 	_, err := c.crbLister.Get("", bindingName)
 	if err != nil && !apierrors.IsNotFound(err) {
+		c.s.AddCondition(&obj.Status.RemoteConditions, condition, failedToGetClusterRoleBinding, err)
 		return fmt.Errorf("failed to get ClusterRoleBinding '%s' from the cache: %w", bindingName, err)
 	}
 
 	if err == nil {
 		// binding exists, nothing to do
+		c.s.AddCondition(&obj.Status.RemoteConditions, condition, clusterAdminRoleExists, nil)
 		return nil
 	}
 
@@ -118,8 +141,11 @@ func (c *grbHandler) ensureClusterAdminBinding(obj *apisv3.GlobalRoleBinding) er
 		},
 	})
 	if err != nil && !apierrors.IsAlreadyExists(err) {
+		c.s.AddCondition(&obj.Status.RemoteConditions, condition, failedToCreateClusterRoleBinding, err)
 		return fmt.Errorf("failed to create ClusterRoleBinding '%s' for admin in downstream '%s': %w", bindingName, c.clusterName, err)
 	}
+
+	c.s.AddCondition(&obj.Status.RemoteConditions, condition, clusterAdminRoleExists, nil)
 	return nil
 }
 
@@ -162,4 +188,41 @@ func grbByUserAndRole(obj interface{}) ([]string, error) {
 	}
 
 	return []string{rbac.GetGRBTargetKey(grb) + "-" + grb.GlobalRoleName}, nil
+}
+
+var timeNow = func() time.Time {
+	return time.Now()
+}
+
+func (c *grbHandler) updateStatus(grb *apisv3.GlobalRoleBinding) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		grbFromCluster, err := c.grbLister.Get(grb.Name)
+		if err != nil {
+			return err
+		}
+		if reflect.DeepEqual(grbFromCluster.Status.RemoteConditions, grb.Status.RemoteConditions) {
+			return nil
+		}
+
+		grbFromCluster.Status.SummaryRemote = status.SummaryCompleted
+		if grbFromCluster.Status.SummaryLocal == status.SummaryCompleted {
+			grbFromCluster.Status.Summary = status.SummaryCompleted
+		}
+		for _, c := range grb.Status.RemoteConditions {
+			if c.Status != metav1.ConditionTrue {
+				grbFromCluster.Status.Summary = status.SummaryError
+				grbFromCluster.Status.SummaryRemote = status.SummaryError
+				break
+			}
+		}
+
+		grbFromCluster.Status.LastUpdateTime = timeNow().String()
+		grbFromCluster.Status.ObservedGenerationRemote = grb.ObjectMeta.Generation
+		grbFromCluster.Status.RemoteConditions = grb.Status.RemoteConditions
+		grbFromCluster, err = c.grbClient.UpdateStatus(grbFromCluster)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
 }
