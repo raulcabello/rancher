@@ -4,6 +4,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/rancher/rancher/pkg/auth/providerrefresh"
@@ -12,6 +13,7 @@ import (
 	v3 "github.com/rancher/rancher/pkg/generated/norman/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/types/config"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/oauth2"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -76,6 +78,23 @@ func (c *UserAttributeController) sync(key string, attribs *v3.UserAttribute) (r
 
 	attribs, err = c.providerRefresh(attribs)
 	if err != nil {
+		var retrieveErr *oauth2.RetrieveError
+		// Stop retrying if the token has expired.
+		if errors.As(err, &retrieveErr) {
+			if retrieveErr.ErrorCode == "invalid_grant" && retrieveErr.ErrorDescription == "Token is not active" {
+				attribs, err = c.userAttributes.Get(name, metav1.GetOptions{})
+				if err != nil {
+					return nil, fmt.Errorf("error getting user attribute %s when token is not active: %w", name, err)
+				}
+				attribs.NeedsRefresh = false
+				updated, err := c.userAttributes.Update(attribs)
+				if err == nil {
+					return updated, nil
+				}
+				err = fmt.Errorf("error updating user attribute %s when token is not active: %w", name, err)
+				return nil, nil
+			}
+		}
 		return nil, fmt.Errorf("error refreshing user attribute %s: %w", name, err)
 	}
 

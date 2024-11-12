@@ -108,7 +108,7 @@ func (o *OpenIDCProvider) LoginUser(ctx context.Context, oauthLoginInfo *v32.OID
 			return userPrincipal, nil, "", userClaimInfo, err
 		}
 	}
-	userInfo, oauth2Token, err := o.getUserInfo(&ctx, config, oauthLoginInfo.Code, &userClaimInfo, "")
+	userInfo, oauth2Token, err := o.getUserInfoFromAuthCode(&ctx, config, oauthLoginInfo.Code, &userClaimInfo, "")
 	if err != nil {
 		return userPrincipal, groupPrincipals, "", userClaimInfo, err
 	}
@@ -221,8 +221,13 @@ func (o *OpenIDCProvider) RefetchGroupPrincipals(principalID string, secret stri
 		logrus.Errorf("[generic oidc] refetchGroupPrincipals: error getting user by principalID: %v", err)
 		return groupPrincipals, err
 	}
+	var oauthToken oauth2.Token
+	if err := json.Unmarshal([]byte(secret), &oauthToken); err != nil {
+		return nil, err
+	}
+
 	//do not need userInfo or oauth2Token since we are only processing groups
-	_, _, err = o.getUserInfo(&o.CTX, config, secret, &claimInfo, user.Name)
+	_, _, err = o.getUserInfoFromToken(&o.CTX, config, &oauthToken, &claimInfo, user.Name)
 	if err != nil {
 		return groupPrincipals, err
 	}
@@ -375,7 +380,7 @@ func (o *OpenIDCProvider) GetUserExtraAttributes(userPrincipal v3.Principal) map
 	return extras
 }
 
-func (o *OpenIDCProvider) getUserInfo(ctx *context.Context, config *v32.OIDCConfig, authCode string, claimInfo *ClaimInfo, userName string) (*oidc.UserInfo, *oauth2.Token, error) {
+func (o *OpenIDCProvider) getUserInfoFromAuthCode(ctx *context.Context, config *v32.OIDCConfig, authCode string, claimInfo *ClaimInfo, userName string) (*oidc.UserInfo, *oauth2.Token, error) {
 	var userInfo *oidc.UserInfo
 	var oauth2Token *oauth2.Token
 	var err error
@@ -414,16 +419,11 @@ func (o *OpenIDCProvider) getUserInfo(ctx *context.Context, config *v32.OIDCConf
 
 	// Valid will return false if access token is expired
 	if !oauth2Token.Valid() {
-		// since token is not valid, the TokenSource func will attempt to refresh the access token
-		// if the refresh token has not expired
-		logrus.Debugf("[generic oidc] getUserInfo: attempting to refresh access token")
+		return userInfo, oauth2Token, fmt.Errorf("not valid token: %w", err)
 	}
-	reusedToken, err := oauth2.ReuseTokenSource(oauth2Token, oauthConfig.TokenSource(updatedContext, oauth2Token)).Token()
-	if err != nil {
-		return userInfo, oauth2Token, err
-	}
-	if !reflect.DeepEqual(oauth2Token, reusedToken) {
-		o.UpdateToken(reusedToken, userName)
+
+	if err := o.UpdateToken(oauth2Token, userName); err != nil {
+		return nil, nil, err
 	}
 
 	if config.AcrValue != "" {
@@ -437,7 +437,7 @@ func (o *OpenIDCProvider) getUserInfo(ctx *context.Context, config *v32.OIDCConf
 	}
 
 	logrus.Debugf("[generic oidc] getUserInfo: getting user info")
-	userInfo, err = provider.UserInfo(updatedContext, oauthConfig.TokenSource(updatedContext, reusedToken))
+	userInfo, err = provider.UserInfo(updatedContext, oauthConfig.TokenSource(updatedContext, oauth2Token))
 	if err != nil {
 		return userInfo, oauth2Token, err
 	}
@@ -446,6 +446,69 @@ func (o *OpenIDCProvider) getUserInfo(ctx *context.Context, config *v32.OIDCConf
 	}
 
 	return userInfo, oauth2Token, nil
+}
+
+func (o *OpenIDCProvider) getUserInfoFromToken(ctx *context.Context, config *v32.OIDCConfig, token *oauth2.Token, claimInfo *ClaimInfo, userName string) (*oidc.UserInfo, *oauth2.Token, error) {
+	var userInfo *oidc.UserInfo
+	var err error
+
+	updatedContext, err := AddCertKeyToContext(*ctx, config.Certificate, config.PrivateKey)
+	if err != nil {
+		return userInfo, token, err
+	}
+
+	provider, err := o.getOIDCProvider(updatedContext, config)
+	if err != nil {
+		return userInfo, token, err
+	}
+	oauthConfig := ConfigToOauthConfig(provider.Endpoint(), config)
+	var verifier = provider.Verifier(&oidc.Config{ClientID: config.ClientID})
+
+	// Valid will return false if access token is expired
+	if !token.Valid() {
+		// since token is not valid, the TokenSource func will attempt to refresh the access token
+		// if the refresh token has not expired
+		logrus.Debugf("[generic oidc] getUserInfo: attempting to refresh access token")
+	}
+	// TODO don't call reusedToken if it has not expired!
+	reusedToken, err := oauth2.ReuseTokenSource(token, oauthConfig.TokenSource(updatedContext, token)).Token()
+	if err != nil {
+		return userInfo, token, err
+	}
+	idToken, err := verifier.Verify(updatedContext, reusedToken.AccessToken)
+	if err != nil {
+		return userInfo, reusedToken, fmt.Errorf("failed to verify ID token: %w", err)
+	}
+	if err := idToken.Claims(&claimInfo); err != nil {
+		return userInfo, token, fmt.Errorf("failed to parse claims: %w", err)
+	}
+	if !reflect.DeepEqual(token, reusedToken) {
+		err := o.UpdateToken(reusedToken, userName)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to update token: %w", err)
+		}
+	}
+
+	if config.AcrValue != "" {
+		acrValue, err := parseACRFromAccessToken(token.AccessToken)
+		if err != nil {
+			return userInfo, token, fmt.Errorf("failed to parse ACR from access token: %w", err)
+		}
+		if !isValidACR(acrValue, config.AcrValue) {
+			return userInfo, token, errors.New("failed to validate ACR")
+		}
+	}
+
+	logrus.Debugf("[generic oidc] getUserInfo: getting user info")
+	userInfo, err = provider.UserInfo(updatedContext, oauthConfig.TokenSource(updatedContext, reusedToken))
+	if err != nil {
+		return userInfo, token, err
+	}
+	if err := userInfo.Claims(&claimInfo); err != nil {
+		return userInfo, token, err
+	}
+
+	return userInfo, token, nil
 }
 
 func ConfigToOauthConfig(endpoint oauth2.Endpoint, config *v32.OIDCConfig) oauth2.Config {

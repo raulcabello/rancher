@@ -1,8 +1,13 @@
 package oidc
 
 import (
+	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	v32 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
+	"golang.org/x/oauth2"
+	"net/http"
 	"testing"
 
 	"github.com/golang-jwt/jwt"
@@ -87,6 +92,66 @@ func TestParseACRFromAccessToken(t *testing.T) {
 			if (err != nil) != tt.wantError {
 				t.Errorf("expected error: %v, got error: %v", tt.wantError, err)
 			}
+		})
+	}
+}
+
+func TestGetUserInfoFromToken(t *testing.T) {
+	key := "key"
+	j := jwt.New(jwt.SigningMethodHS256)
+	s, err := j.SignedString(key)
+
+	tests := map[string]struct {
+		config    *v32.OIDCConfig
+		token     *oauth2.Token
+		claimInfo *ClaimInfo
+		userName  string
+	}{
+		"": {
+			config: &v32.OIDCConfig{
+				Certificate: "",
+				PrivateKey:  "",
+				Issuer:      "http://localhost:8899",
+			},
+			token:     nil,
+			claimInfo: nil,
+			userName:  "",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			go func() {
+				http.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+					config := v32.OIDCConfig{
+						Issuer:           "http://localhost:8899",
+						TokenEndpoint:    "http://localhost:8899/token",
+						UserInfoEndpoint: "http://localhost:8899/userinfo",
+					}
+
+					w.Header().Set("Content-Type", "application/json")
+					json.NewEncoder(w).Encode(config)
+				})
+				/*	listener, err := net.Listen("tcp", ":0")
+					if err != nil {
+						panic(err)
+					}
+
+					fmt.Println("Using port:", listener.Addr().(*net.TCPAddr).Port)
+				*/
+				if err := http.ListenAndServe(":8899", nil); err != nil {
+					assert.Failf(t, "can't create http server", err.Error())
+				}
+				//TODO close server!
+			}()
+			o := OpenIDCProvider{}
+			ctx := context.TODO()
+			userInfo, token, err := o.getUserInfoFromToken(&ctx, test.config, test.token, test.claimInfo, test.userName)
+
+			fmt.Println(userInfo)
+			fmt.Println(token)
+			fmt.Println(err)
 		})
 	}
 }
