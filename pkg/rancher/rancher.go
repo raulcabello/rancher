@@ -228,6 +228,7 @@ func New(ctx context.Context, clientConfg clientcmd.ClientConfig, opts *Options)
 
 	additionalAPIPreMCM := steveapi.AdditionalAPIsPreMCM(wranglerContext)
 	additionalAPI, err := steveapi.AdditionalAPIs(ctx, wranglerContext, steve)
+
 	if err != nil {
 		return nil, err
 	}

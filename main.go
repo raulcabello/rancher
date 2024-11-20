@@ -1,12 +1,6 @@
 package main
 
 import (
-	"log"
-	"net/http"
-	_ "net/http/pprof"
-	"os"
-	"path/filepath"
-
 	"github.com/docker/docker/pkg/reexec"
 	"github.com/ehazlett/simplelog"
 	_ "github.com/rancher/norman/controller"
@@ -18,6 +12,11 @@ import (
 	"github.com/rancher/wrangler/v3/pkg/signals"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
+	"log"
+	"net/http"
+	_ "net/http/pprof"
+	"os"
+	"path/filepath"
 )
 
 var (

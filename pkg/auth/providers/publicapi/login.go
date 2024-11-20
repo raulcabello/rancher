@@ -65,6 +65,11 @@ func (h *loginHandler) login(actionName string, action *types.Action, request *t
 		return httperror.NewAPIError(httperror.ActionNotAvailable, "")
 	}
 
+	/*err := h.getUserForOIDCProvider(request)
+	if err != nil {
+		return err
+	}
+	return nil*/
 	w := request.Response
 
 	token, unhashedTokenKey, responseType, err := h.createLoginToken(request)
@@ -97,6 +102,108 @@ func (h *loginHandler) login(actionName string, action *types.Action, request *t
 		request.WriteResponse(http.StatusCreated, tokenData)
 	}
 
+	return nil
+}
+
+func (h *loginHandler) getUserForOIDCProvider(request *types.APIContext) error {
+	var userPrincipal v3.Principal
+	//	var groupPrincipals []v3.Principal
+	logrus.Debugf("Create Token Invoked")
+
+	bytes, err := ioutil.ReadAll(request.Request.Body)
+	if err != nil {
+		logrus.Errorf("login failed with error: %v", err)
+		return httperror.NewAPIError(httperror.InvalidBodyContent, "")
+	}
+
+	generic := &apiv3.GenericLogin{}
+	err = json.Unmarshal(bytes, generic)
+	if err != nil {
+		logrus.Errorf("unmarshal failed with error: %v", err)
+		return httperror.NewAPIError(httperror.InvalidBodyContent, "")
+	}
+
+	/*authTimeout := settings.AuthUserSessionTTLMinutes.Get()
+	if minutes, err := strconv.ParseInt(authTimeout, 10, 64); err == nil {
+		ttl = minutes * 60 * 1000
+	}*/
+
+	var input interface{}
+	var providerName string
+	switch request.Type {
+	case client.LocalProviderType:
+		input = &apiv3.BasicLogin{}
+		providerName = local.Name
+	case client.GithubProviderType:
+		input = &apiv3.GithubLogin{}
+		providerName = github.Name
+	case client.ActiveDirectoryProviderType:
+		input = &apiv3.BasicLogin{}
+		providerName = activedirectory.Name
+	case client.AzureADProviderType:
+		input = &apiv3.AzureADLogin{}
+		providerName = azure.Name
+	case client.OpenLdapProviderType:
+		input = &apiv3.BasicLogin{}
+		providerName = ldap.OpenLdapName
+	case client.FreeIpaProviderType:
+		input = &apiv3.BasicLogin{}
+		providerName = ldap.FreeIpaName
+	case client.PingProviderType:
+		input = &apiv3.SamlLoginInput{}
+		providerName = saml.PingName
+	case client.ADFSProviderType:
+		input = &apiv3.SamlLoginInput{}
+		providerName = saml.ADFSName
+	case client.KeyCloakProviderType:
+		input = &apiv3.SamlLoginInput{}
+		providerName = saml.KeyCloakName
+	case client.OKTAProviderType:
+		input = &apiv3.SamlLoginInput{}
+		providerName = saml.OKTAName
+	case client.ShibbolethProviderType:
+		input = &apiv3.SamlLoginInput{}
+		providerName = saml.ShibbolethName
+	case client.GoogleOAuthProviderType:
+		input = &apiv3.GoogleOauthLogin{}
+		providerName = googleoauth.Name
+	case client.OIDCProviderType:
+		input = &apiv3.OIDCLogin{}
+		providerName = oidc.Name
+	case client.KeyCloakOIDCProviderType:
+		input = &apiv3.OIDCLogin{}
+		providerName = keycloakoidc.Name
+	case client.GenericOIDCProviderType:
+		input = &apiv3.OIDCLogin{}
+		providerName = genericoidc.Name
+	default:
+		return httperror.NewAPIError(httperror.ServerError, "unknown authentication provider")
+	}
+
+	err = json.Unmarshal(bytes, input)
+	if err != nil {
+		logrus.Errorf("unmarshal failed with error: %v", err)
+		return httperror.NewAPIError(httperror.InvalidBodyContent, "")
+	}
+
+	// Authenticate User
+	// SAML's login flow is different from the other providers. Unlike the other providers, it gets the logged in user's data via a POST from
+	// the identity provider on a separate endpoint specifically for that.
+
+	/*if providerName == saml.PingName || providerName == saml.ADFSName || providerName == saml.KeyCloakName ||
+		providerName == saml.OKTAName || providerName == saml.ShibbolethName {
+		err = saml.PerformSamlLogin(providerName, request, input)
+		return v3.Token{}, "", "saml", err
+	}
+
+	ctx := context.WithValue(request.Request.Context(), util.RequestKey, request.Request)*/
+	userPrincipal, _, _, err = providers.AuthenticateUser(context.TODO(), input, providerName)
+	if err != nil {
+		return err
+	}
+	if err := json.NewEncoder(request.Response).Encode(userPrincipal); err != nil { //TODO Group??
+		return err
+	}
 	return nil
 }
 
