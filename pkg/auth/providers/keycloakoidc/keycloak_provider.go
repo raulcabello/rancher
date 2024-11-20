@@ -28,12 +28,12 @@ const (
 	GroupType = "group"
 )
 
-type keyCloakOIDCProvider struct {
+type KeyCloakOIDCProvider struct {
 	oidc.OpenIDCProvider
 }
 
 func Configure(ctx context.Context, mgmtCtx *config.ScaledContext, userMGR user.Manager, tokenMGR *tokens.Manager) common.AuthProvider {
-	return &keyCloakOIDCProvider{
+	return &KeyCloakOIDCProvider{
 		oidc.OpenIDCProvider{
 			Name:        Name,
 			Type:        client.KeyCloakOIDCConfigType,
@@ -46,11 +46,11 @@ func Configure(ctx context.Context, mgmtCtx *config.ScaledContext, userMGR user.
 	}
 }
 
-func (k *keyCloakOIDCProvider) GetName() string {
+func (k *KeyCloakOIDCProvider) GetName() string {
 	return Name
 }
 
-func (k *keyCloakOIDCProvider) newClient(config *v32.OIDCConfig, token v3.Token) (*KeyCloakClient, error) {
+func (k *KeyCloakOIDCProvider) newClient(config *v32.OIDCConfig, token v3.Token) (*KeyCloakClient, error) {
 	// creating context for new client and for refreshing oauth token if needed
 	ctx, err := oidc.AddCertKeyToContext(context.Background(), config.Certificate, config.PrivateKey)
 	if err != nil {
@@ -73,7 +73,7 @@ func (k *keyCloakOIDCProvider) newClient(config *v32.OIDCConfig, token v3.Token)
 	return keyCloakClient, err
 }
 
-func (k *keyCloakOIDCProvider) SearchPrincipals(searchValue, principalType string, token v3.Token) ([]v3.Principal, error) {
+func (k *KeyCloakOIDCProvider) SearchPrincipals(searchValue, principalType string, token v3.Token) ([]v3.Principal, error) {
 	var principals []v3.Principal
 	var err error
 
@@ -98,7 +98,7 @@ func (k *keyCloakOIDCProvider) SearchPrincipals(searchValue, principalType strin
 	return principals, nil
 }
 
-func (k *keyCloakOIDCProvider) toPrincipal(principalType string, acct account, token *v3.Token) v3.Principal {
+func (k *KeyCloakOIDCProvider) toPrincipal(principalType string, acct account, token *v3.Token) v3.Principal {
 	displayName := acct.Name
 	if displayName == "" {
 		displayName = acct.Username
@@ -126,7 +126,7 @@ func (k *keyCloakOIDCProvider) toPrincipal(principalType string, acct account, t
 	return princ
 }
 
-func (k *keyCloakOIDCProvider) GetPrincipal(principalID string, token v3.Token) (v3.Principal, error) {
+func (k *KeyCloakOIDCProvider) GetPrincipal(principalID string, token v3.Token) (v3.Principal, error) {
 	config, err := k.GetOIDCConfig()
 	if err != nil {
 		return v3.Principal{}, err
@@ -155,7 +155,7 @@ func (k *keyCloakOIDCProvider) GetPrincipal(principalID string, token v3.Token) 
 	return princ, err
 }
 
-func (k *keyCloakOIDCProvider) getRefreshAndUpdateToken(ctx context.Context, oauthConfig oauth2.Config, token v3.Token) (*oauth2.Token, error) {
+func (k *KeyCloakOIDCProvider) getRefreshAndUpdateToken(ctx context.Context, oauthConfig oauth2.Config, token v3.Token) (*oauth2.Token, error) {
 	var oauthToken *oauth2.Token
 	storedOauthToken, err := k.TokenMGR.GetSecret(token.UserID, token.AuthProvider, []*v3.Token{&token})
 	if err := json.Unmarshal([]byte(storedOauthToken), &oauthToken); err != nil {

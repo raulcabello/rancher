@@ -108,13 +108,13 @@ func (o *OpenIDCProvider) LoginUser(ctx context.Context, oauthLoginInfo *v32.OID
 			return userPrincipal, nil, "", userClaimInfo, err
 		}
 	}
-	userInfo, oauth2Token, err := o.getUserInfo(&ctx, config, oauthLoginInfo.Code, &userClaimInfo, "")
+	userInfo, oauth2Token, err := o.GetUserInfo(&ctx, config, oauthLoginInfo.Code, &userClaimInfo, "")
 	if err != nil {
 		return userPrincipal, groupPrincipals, "", userClaimInfo, err
 	}
-	userPrincipal = o.userToPrincipal(userInfo, userClaimInfo)
+	userPrincipal = o.UserToPrincipal(userInfo, userClaimInfo)
 	userPrincipal.Me = true
-	groupPrincipals = o.getGroupsFromClaimInfo(userClaimInfo)
+	groupPrincipals = o.GetGroupsFromClaimInfo(userClaimInfo)
 
 	logrus.Debugf("[generic oidc] loginuser: checking user's access to rancher")
 	allowed, err := o.UserMGR.CheckAccess(config.AccessMode, config.AllowedPrincipalIDs, userPrincipal.Name, groupPrincipals)
@@ -222,11 +222,11 @@ func (o *OpenIDCProvider) RefetchGroupPrincipals(principalID string, secret stri
 		return groupPrincipals, err
 	}
 	//do not need userInfo or oauth2Token since we are only processing groups
-	_, _, err = o.getUserInfo(&o.CTX, config, secret, &claimInfo, user.Name)
+	_, _, err = o.GetUserInfo(&o.CTX, config, secret, &claimInfo, user.Name)
 	if err != nil {
 		return groupPrincipals, err
 	}
-	return o.getGroupsFromClaimInfo(claimInfo), nil
+	return o.GetGroupsFromClaimInfo(claimInfo), nil
 }
 
 func (o *OpenIDCProvider) CanAccessWithGroupProviders(userPrincipalID string, groupPrincipals []v3.Principal) (bool, error) {
@@ -242,7 +242,7 @@ func (o *OpenIDCProvider) CanAccessWithGroupProviders(userPrincipalID string, gr
 	return allowed, nil
 }
 
-func (o *OpenIDCProvider) userToPrincipal(userInfo *oidc.UserInfo, claimInfo ClaimInfo) v3.Principal {
+func (o *OpenIDCProvider) UserToPrincipal(userInfo *oidc.UserInfo, claimInfo ClaimInfo) v3.Principal {
 	displayName := claimInfo.Name
 	if displayName == "" {
 		displayName = userInfo.Email
@@ -375,7 +375,7 @@ func (o *OpenIDCProvider) GetUserExtraAttributes(userPrincipal v3.Principal) map
 	return extras
 }
 
-func (o *OpenIDCProvider) getUserInfo(ctx *context.Context, config *v32.OIDCConfig, authCode string, claimInfo *ClaimInfo, userName string) (*oidc.UserInfo, *oauth2.Token, error) {
+func (o *OpenIDCProvider) GetUserInfo(ctx *context.Context, config *v32.OIDCConfig, authCode string, claimInfo *ClaimInfo, userName string) (*oidc.UserInfo, *oauth2.Token, error) {
 	var userInfo *oidc.UserInfo
 	var oauth2Token *oauth2.Token
 	var err error
@@ -416,7 +416,7 @@ func (o *OpenIDCProvider) getUserInfo(ctx *context.Context, config *v32.OIDCConf
 	if !oauth2Token.Valid() {
 		// since token is not valid, the TokenSource func will attempt to refresh the access token
 		// if the refresh token has not expired
-		logrus.Debugf("[generic oidc] getUserInfo: attempting to refresh access token")
+		logrus.Debugf("[generic oidc] GetUserInfo: attempting to refresh access token")
 	}
 	reusedToken, err := oauth2.ReuseTokenSource(oauth2Token, oauthConfig.TokenSource(updatedContext, oauth2Token)).Token()
 	if err != nil {
@@ -436,7 +436,7 @@ func (o *OpenIDCProvider) getUserInfo(ctx *context.Context, config *v32.OIDCConf
 		}
 	}
 
-	logrus.Debugf("[generic oidc] getUserInfo: getting user info")
+	logrus.Debugf("[generic oidc] GetUserInfo: getting user info")
 	userInfo, err = provider.UserInfo(updatedContext, oauthConfig.TokenSource(updatedContext, reusedToken))
 	if err != nil {
 		return userInfo, oauth2Token, err
@@ -470,7 +470,7 @@ func ConfigToOauthConfig(endpoint oauth2.Endpoint, config *v32.OIDCConfig) oauth
 	}
 }
 
-func (o *OpenIDCProvider) getGroupsFromClaimInfo(claimInfo ClaimInfo) []v3.Principal {
+func (o *OpenIDCProvider) GetGroupsFromClaimInfo(claimInfo ClaimInfo) []v3.Principal {
 	var groupPrincipals []v3.Principal
 
 	if claimInfo.FullGroupPath != nil {

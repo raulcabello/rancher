@@ -2,6 +2,7 @@ package steve
 
 import (
 	"context"
+	"github.com/rancher/rancher/pkg/oidcprovider"
 	"net/http"
 
 	gmux "github.com/gorilla/mux"
@@ -61,6 +62,9 @@ func AdditionalAPIs(ctx context.Context, config *wrangler.Context, steve *steve.
 	}
 	mux.Handle("/v1/github{path:.*}", githubHandler)
 	mux.Handle("/v3/connect", Tunnel(config))
+
+	//add oidc provider
+	oidcprovider.RegisterOIDCProviderHandles(mux)
 
 	health.Register(mux)
 
