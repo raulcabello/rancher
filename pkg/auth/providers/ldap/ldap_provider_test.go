@@ -117,7 +117,7 @@ func Test_ldapProvider_getLDAPConfig(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := &ldapProvider{
+			p := &LdapProvider{
 				ctx:                   tt.fields.ctx,
 				authConfigs:           tt.fields.authConfigs,
 				secrets:               tt.fields.secrets,
@@ -132,14 +132,14 @@ func Test_ldapProvider_getLDAPConfig(t *testing.T) {
 			}
 			gotStoredLdapConfig, gotCaPool, err := p.getLDAPConfig(tt.fields.mockGenericClient)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("ldapProvider.getLDAPConfig() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("LdapProvider.getLDAPConfig() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if !reflect.DeepEqual(gotStoredLdapConfig, tt.wantStoredLdapConfig) {
-				t.Errorf("ldapProvider.getLDAPConfig() got = %v, want %v", gotStoredLdapConfig, tt.wantStoredLdapConfig)
+				t.Errorf("LdapProvider.getLDAPConfig() got = %v, want %v", gotStoredLdapConfig, tt.wantStoredLdapConfig)
 			}
 			if !reflect.DeepEqual(gotCaPool, tt.wantCaPool) {
-				t.Errorf("ldapProvider.getLDAPConfig() got1 = %v, want %v", gotCaPool, tt.wantCaPool)
+				t.Errorf("LdapProvider.getLDAPConfig() got1 = %v, want %v", gotCaPool, tt.wantCaPool)
 			}
 		})
 	}

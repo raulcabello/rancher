@@ -163,7 +163,7 @@ func Test_ldapProvider_loginUser(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := &ldapProvider{
+			p := &LdapProvider{
 				ctx:                   tt.fields.ctx,
 				authConfigs:           tt.fields.authConfigs,
 				secrets:               tt.fields.secrets,
@@ -178,14 +178,14 @@ func Test_ldapProvider_loginUser(t *testing.T) {
 			}
 			gotUserPrincipal, gotGroupPrincipals, err := p.loginUser(tt.args.lConn, tt.args.credential, tt.args.config, tt.args.caPool)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("ldapProvider.loginUser() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("LdapProvider.loginUser() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if !reflect.DeepEqual(gotUserPrincipal, tt.wantUserPrincipal) {
-				t.Errorf("ldapProvider.loginUser() got = %v, want %v", gotUserPrincipal, tt.wantUserPrincipal)
+				t.Errorf("LdapProvider.loginUser() got = %v, want %v", gotUserPrincipal, tt.wantUserPrincipal)
 			}
 			if !reflect.DeepEqual(gotGroupPrincipals, tt.wantGroupPrincipals) {
-				t.Errorf("ldapProvider.loginUser() got1 = %v, want %v", gotGroupPrincipals, tt.wantGroupPrincipals)
+				t.Errorf("LdapProvider.loginUser() got1 = %v, want %v", gotGroupPrincipals, tt.wantGroupPrincipals)
 			}
 		})
 	}

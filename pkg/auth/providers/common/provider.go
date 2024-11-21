@@ -37,4 +37,7 @@ type AuthProvider interface {
 	// Logout implements a guard against invoking the "logout" action when "logout-all" is
 	// forced. If "logout-all" is not supported by the provider do nothing and return nil.
 	Logout(apiContext *types.APIContext, token *v3.Token) error
+
+	//GetRedirectUrl() string
+	//GetClaimInfo(input interface{}) *oidc.ClaimInfo
 }

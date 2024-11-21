@@ -17,12 +17,12 @@ import (
 	"k8s.io/client-go/util/retry"
 )
 
-func (p *ldapProvider) formatter(apiContext *types.APIContext, resource *types.RawResource) {
+func (p *LdapProvider) formatter(apiContext *types.APIContext, resource *types.RawResource) {
 	common.AddCommonActions(apiContext, resource)
 	resource.AddAction(apiContext, "testAndApply")
 }
 
-func (p *ldapProvider) actionHandler(actionName string, action *types.Action, request *types.APIContext) error {
+func (p *LdapProvider) actionHandler(actionName string, action *types.Action, request *types.APIContext) error {
 	handled, err := common.HandleCommonAction(actionName, action, request, p.providerName, p.authConfigs)
 	if err != nil {
 		return err
@@ -38,7 +38,7 @@ func (p *ldapProvider) actionHandler(actionName string, action *types.Action, re
 	return httperror.NewAPIError(httperror.ActionNotAvailable, "")
 }
 
-func (p *ldapProvider) testAndApply(request *types.APIContext) error {
+func (p *LdapProvider) testAndApply(request *types.APIContext) error {
 	var input map[string]interface{}
 	var err error
 	input, err = handler.ParseAndValidateActionBody(request, request.Schemas.Schema(&managementschema.Version,
@@ -113,7 +113,7 @@ func (p *ldapProvider) testAndApply(request *types.APIContext) error {
 	return p.tokenMGR.CreateTokenAndSetCookie(user.Name, userPrincipal, groupPrincipals, "", 0, "Token via LDAP Configuration", request)
 }
 
-func (p *ldapProvider) saveLDAPConfig(config *v3.LdapConfig) error {
+func (p *LdapProvider) saveLDAPConfig(config *v3.LdapConfig) error {
 	storedConfig, _, err := p.getLDAPConfig(p.authConfigs.ObjectClient().UnstructuredClient())
 	if err != nil {
 		return err

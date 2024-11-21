@@ -6,23 +6,22 @@ import (
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"github.com/gorilla/mux"
 	"github.com/ory/fosite"
 	"github.com/ory/fosite/compose"
 	"github.com/ory/fosite/handler/openid"
 	"github.com/ory/fosite/storage"
-	"github.com/ory/fosite/token/jwt"
-	"github.com/rancher/rancher/pkg/auth/providers"
-	"github.com/rancher/rancher/pkg/auth/providers/keycloakoidc"
-	"github.com/rancher/rancher/pkg/auth/providers/oidc"
 	"golang.org/x/crypto/bcrypt"
 	"log"
 	"math/big"
 	"net/http"
-	"net/url"
 	"time"
 )
+
+type authProvider interface {
+	ShowLoginPage(w http.ResponseWriter, r *http.Request)
+	Login(r *http.Request) (*openid.DefaultSession, error)
+}
 
 const ClientID = "oidc-client"
 
@@ -33,7 +32,7 @@ var (
 
 // Initialize Fosite provider
 func newOAuth2Provider() fosite.OAuth2Provider {
-	Host = "https://4d0594e765e9.ngrok.app/oidc" //settings.ServerURL.Get() + "/oidc"
+	Host = "https://2998f18c4820.ngrok.app/oidc" //TODO get from settings! //settings.ServerURL.Get() + "/oidc"
 	// This secret is being used to sign access and refresh tokens as well as
 	// authorization codes. It must be exactly 32 bytes long.
 	var secret = []byte("BimPY6GrQCX2cYPJi3b1jxxAlci2/cS")
@@ -73,73 +72,33 @@ func newOAuth2Provider() fosite.OAuth2Provider {
 
 func RegisterOIDCProviderHandles(mux *mux.Router) {
 	oauth2Provider := newOAuth2Provider()
+
 	mux.HandleFunc("/oidc/authorize/callback", func(w http.ResponseWriter, r *http.Request) {
-		ctx := context.Background()
-		var userClaimInfo oidc.ClaimInfo
-		// TODO avoid panic if code or nonce not provided!
-		code := r.URL.Query()["code"][0]
-		nonce := r.URL.Query()["nonce"][0]
+		ctx := context.TODO()
 
-		// TODO it could be any provider!
-		p, err := providers.GetProvider(keycloakoidc.Name)
+		p, err := getActiveProvider()
 		if err != nil {
-			http.Error(w, "failed to parse provider", http.StatusInternalServerError)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-
-		o := p.(*keycloakoidc.KeyCloakOIDCProvider)
+		session, err := p.Login(r)
 		if err != nil {
-			http.Error(w, "failed to parse provider", http.StatusInternalServerError)
+			http.Error(w, "failed to login: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-
-		config, err := o.GetOIDCConfig()
-		if err != nil {
-			http.Error(w, "failed to get config", http.StatusInternalServerError)
-			return
-		}
-
-		userInfo, oauth2Token, err := o.GetUserInfo(&ctx, config, code, &userClaimInfo, "")
-		userPrincipal := o.UserToPrincipal(userInfo, userClaimInfo)
-		groupPrincipals := o.GetGroupsFromClaimInfo(userClaimInfo)
-		fmt.Println(userInfo)
-		fmt.Println(oauth2Token)
-		fmt.Println(userPrincipal)
-		fmt.Println(groupPrincipals)
-
-		var mySession = &openid.DefaultSession{
-			Username: userClaimInfo.PreferredUsername,
-			Subject:  userClaimInfo.PreferredUsername,
-			Claims: &jwt.IDTokenClaims{
-				Issuer:      Host,
-				Nonce:       nonce,
-				Subject:     userClaimInfo.PreferredUsername,
-				Audience:    []string{"https://my-client.my-application.com"}, //TODO change!
-				ExpiresAt:   time.Now().Add(time.Hour * 6),
-				IssuedAt:    time.Now(),
-				RequestedAt: time.Now(),
-				AuthTime:    time.Now(),
-				Extra: map[string]interface{}{
-					"groups": userClaimInfo.Groups,
-				},
-			},
-			Headers: &jwt.Headers{
-				Extra: make(map[string]interface{}),
-			},
-		} // Customize this session for your needs
-
 		// Handle authorization request
 		authorizeRequest, err := oauth2Provider.NewAuthorizeRequest(ctx, r)
 		if err != nil {
 			oauth2Provider.WriteAuthorizeError(ctx, w, authorizeRequest, err)
 			return
 		}
+		// TODO configure scopes
 		authorizeRequest.GrantScope("openid")
 		authorizeRequest.GrantScope("email")
 		authorizeRequest.GrantScope("profile")
 
 		// Validate client and issue an authorization code
-		response, err := oauth2Provider.NewAuthorizeResponse(ctx, authorizeRequest, mySession)
+		response, err := oauth2Provider.NewAuthorizeResponse(ctx, authorizeRequest, session)
 		if err != nil {
 			oauth2Provider.WriteAuthorizeError(ctx, w, authorizeRequest, err)
 			return
@@ -206,32 +165,12 @@ func RegisterOIDCProviderHandles(mux *mux.Router) {
 
 	// entry point for auth flow
 	mux.HandleFunc("/oidc/authorize", func(w http.ResponseWriter, r *http.Request) {
-		values, err := url.ParseQuery(r.URL.RawQuery)
-		if err != nil {
-			http.Error(w, "failed to parse values", http.StatusInternalServerError)
-		}
-		state := values.Get("state")
-		nonce := values.Get("nonce")
-
-		// TODO it could be any provider!
-		p, err := providers.GetProvider(keycloakoidc.Name)
-		if err != nil {
-			http.Error(w, "failed to find provider", http.StatusInternalServerError)
-			return
-		}
-
-		o := p.(*keycloakoidc.KeyCloakOIDCProvider)
-		if err != nil {
-			http.Error(w, "failed to parse provider", http.StatusInternalServerError)
-			return
-		}
-		c, err := o.GetOIDCConfig()
+		p, err := getActiveProvider()
 		if err != nil {
 			http.Error(w, "failed to get config", http.StatusInternalServerError)
 			return
 		}
-		url := c.AuthEndpoint + "?client_id=" + c.ClientID + "&response_type=code&redirect_uri=" + c.RancherURL + "&scope=openid%20profile%20email&state=oidc-provider:::" + state + ":::" + nonce // TODO using ::: as divider is not safe look for a better approach!
-		http.Redirect(w, r, url, http.StatusFound)                                                                                                                                                 //redirect to keycloack. Then keycloack will redirect to Rancher verify-auth
+		p.ShowLoginPage(w, r)
 	})
 
 }

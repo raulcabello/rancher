@@ -19,7 +19,7 @@ import (
 
 var operationalAttrList = []string{"1.1", "+", "*"}
 
-func (p *ldapProvider) loginUser(lConn ldapv3.Client, credential *v32.BasicLogin, config *v3.LdapConfig, caPool *x509.CertPool) (v3.Principal, []v3.Principal, error) {
+func (p *LdapProvider) loginUser(lConn ldapv3.Client, credential *v32.BasicLogin, config *v3.LdapConfig, caPool *x509.CertPool) (v3.Principal, []v3.Principal, error) {
 	logrus.Debug("Now generating Ldap token")
 
 	username := credential.Username
@@ -101,7 +101,7 @@ func (p *ldapProvider) loginUser(lConn ldapv3.Client, credential *v32.BasicLogin
 	return userPrincipal, groupPrincipals, err
 }
 
-func (p *ldapProvider) getPrincipalsFromSearchResult(result *ldapv3.SearchResult, opResult *ldapv3.SearchResult, config *v3.LdapConfig, lConn ldapv3.Client) (v3.Principal, []v3.Principal, error) {
+func (p *LdapProvider) getPrincipalsFromSearchResult(result *ldapv3.SearchResult, opResult *ldapv3.SearchResult, config *v3.LdapConfig, lConn ldapv3.Client) (v3.Principal, []v3.Principal, error) {
 	var groupPrincipals []v3.Principal
 	var userPrincipal v3.Principal
 	var nonDupGroupPrincipals []v3.Principal
@@ -235,7 +235,7 @@ func (p *ldapProvider) getPrincipalsFromSearchResult(result *ldapv3.SearchResult
 	return userPrincipal, groupPrincipals, nil
 }
 
-func (p *ldapProvider) getPrincipal(distinguishedName string, scope string, config *v3.LdapConfig, caPool *x509.CertPool) (*v3.Principal, error) {
+func (p *LdapProvider) getPrincipal(distinguishedName string, scope string, config *v3.LdapConfig, caPool *x509.CertPool) (*v3.Principal, error) {
 	var search *ldapv3.SearchRequest
 	var filter string
 	if (scope != p.userScope) && (scope != p.groupScope) {
@@ -342,7 +342,7 @@ func (p *ldapProvider) getPrincipal(distinguishedName string, scope string, conf
 	return principal, nil
 }
 
-func (p *ldapProvider) searchPrincipals(name, principalType string, config *v3.LdapConfig, lConn ldapv3.Client) ([]v3.Principal, error) {
+func (p *LdapProvider) searchPrincipals(name, principalType string, config *v3.LdapConfig, lConn ldapv3.Client) ([]v3.Principal, error) {
 	name = ldapv3.EscapeFilter(name)
 	var principals []v3.Principal
 
@@ -365,7 +365,7 @@ func (p *ldapProvider) searchPrincipals(name, principalType string, config *v3.L
 	return principals, nil
 }
 
-func (p *ldapProvider) searchUser(name string, config *v3.LdapConfig, lConn ldapv3.Client) ([]v3.Principal, error) {
+func (p *LdapProvider) searchUser(name string, config *v3.LdapConfig, lConn ldapv3.Client) ([]v3.Principal, error) {
 	srchAttributes := strings.Split(config.UserSearchAttribute, "|")
 	query := fmt.Sprintf("(&(%v=%v)", ObjectClass, config.UserObjectClass)
 	srchAttrs := "(|"
@@ -384,7 +384,7 @@ func (p *ldapProvider) searchUser(name string, config *v3.LdapConfig, lConn ldap
 	return p.searchLdap(query, p.userScope, config, lConn)
 }
 
-func (p *ldapProvider) searchGroup(name string, config *v3.LdapConfig, lConn ldapv3.Client) ([]v3.Principal, error) {
+func (p *LdapProvider) searchGroup(name string, config *v3.LdapConfig, lConn ldapv3.Client) ([]v3.Principal, error) {
 	searchFmt := config.GroupSearchAttribute + "=*%s*"
 	if config.GroupSearchAttribute == "gidNumber" {
 		// specific integer match, can't use wildcard
@@ -396,7 +396,7 @@ func (p *ldapProvider) searchGroup(name string, config *v3.LdapConfig, lConn lda
 	return p.searchLdap(query, p.groupScope, config, lConn)
 }
 
-func (p *ldapProvider) searchLdap(query string, scope string, config *v3.LdapConfig, lConn ldapv3.Client) ([]v3.Principal, error) {
+func (p *LdapProvider) searchLdap(query string, scope string, config *v3.LdapConfig, lConn ldapv3.Client) ([]v3.Principal, error) {
 	var principals []v3.Principal
 	var search *ldapv3.SearchRequest
 
@@ -471,14 +471,14 @@ func (p *ldapProvider) searchLdap(query string, scope string, config *v3.LdapCon
 	return principals, nil
 }
 
-func (p *ldapProvider) permissionCheck(attributes []*ldapv3.EntryAttribute, config *v3.LdapConfig) bool {
+func (p *LdapProvider) permissionCheck(attributes []*ldapv3.EntryAttribute, config *v3.LdapConfig) bool {
 	userObjectClass := config.UserObjectClass
 	userEnabledAttribute := config.UserEnabledAttribute
 	userDisabledBitMask := config.UserDisabledBitMask
 	return ldap.HasPermission(attributes, userObjectClass, userEnabledAttribute, userDisabledBitMask)
 }
 
-func (p *ldapProvider) RefetchGroupPrincipals(principalID string, secret string) ([]v3.Principal, error) {
+func (p *LdapProvider) RefetchGroupPrincipals(principalID string, secret string) ([]v3.Principal, error) {
 	config, caPool, err := p.getLDAPConfig(p.authConfigs.ObjectClient().UnstructuredClient())
 	if err != nil {
 		return nil, err
