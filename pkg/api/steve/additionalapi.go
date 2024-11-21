@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/rancher/rancher/pkg/oidcprovider"
 	"net/http"
+	"time"
 
 	gmux "github.com/gorilla/mux"
 	"github.com/rancher/rancher/pkg/api/steve/aggregation"
@@ -63,8 +64,12 @@ func AdditionalAPIs(ctx context.Context, config *wrangler.Context, steve *steve.
 	mux.Handle("/v1/github{path:.*}", githubHandler)
 	mux.Handle("/v3/connect", Tunnel(config))
 
-	//add oidc provider
-	oidcprovider.RegisterOIDCProviderHandles(mux)
+	go func() {
+		// TODO wait for settings.ServerURL.Get() populated. Find a better way for this!
+		time.Sleep(5 * time.Second)
+		// TODO is there a better way of exposing the oidc provider endpoints?
+		oidcprovider.RegisterOIDCProviderHandles(mux)
+	}()
 
 	health.Register(mux)
 

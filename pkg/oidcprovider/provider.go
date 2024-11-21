@@ -11,6 +11,7 @@ import (
 	"github.com/ory/fosite/compose"
 	"github.com/ory/fosite/handler/openid"
 	"github.com/ory/fosite/storage"
+	"github.com/rancher/rancher/pkg/settings"
 	"golang.org/x/crypto/bcrypt"
 	"log"
 	"math/big"
@@ -32,7 +33,7 @@ var (
 
 // Initialize Fosite provider
 func newOAuth2Provider() fosite.OAuth2Provider {
-	Host = "https://2998f18c4820.ngrok.app/oidc" //TODO get from settings! //settings.ServerURL.Get() + "/oidc"
+	Host = settings.ServerURL.Get() + "/oidc"
 	// This secret is being used to sign access and refresh tokens as well as
 	// authorization codes. It must be exactly 32 bytes long.
 	var secret = []byte("BimPY6GrQCX2cYPJi3b1jxxAlci2/cS")
@@ -40,13 +41,11 @@ func newOAuth2Provider() fosite.OAuth2Provider {
 
 	// In-memory storage for simplicity
 	store := storage.NewMemoryStore()
-	// Example client (you can fetch these from a database instead)
 	store.Clients[ClientID] = &fosite.DefaultClient{
 		ID:     ClientID,
 		Secret: bytes,
 		RedirectURIs: []string{
-			Host + "/callback",
-			"http://localhost:8000",
+			"http://localhost:8000", // TODO harcoded for https://github.com/int128/kubelogin. Should be customizable!
 		},
 		GrantTypes:    []string{"authorization_code"},
 		ResponseTypes: []string{"code"},
