@@ -61,6 +61,11 @@ func (k *keycloak) Login(r *http.Request) (*openid.DefaultSession, error) {
 	fmt.Println(userPrincipal)
 	fmt.Println(groupPrincipals)
 
+	var groups []string
+	for _, group := range userClaimInfo.Groups {
+		groups = append(groups, "keycloakoidc_group://"+group)
+	}
+
 	var mySession = &openid.DefaultSession{
 		Username: userClaimInfo.PreferredUsername,
 		Subject:  userClaimInfo.PreferredUsername,
@@ -74,7 +79,7 @@ func (k *keycloak) Login(r *http.Request) (*openid.DefaultSession, error) {
 			RequestedAt: time.Now(),
 			AuthTime:    time.Now(),
 			Extra: map[string]interface{}{
-				"groups": userClaimInfo.Groups,
+				"groups": groups,
 			},
 		},
 		Headers: &jwt.Headers{

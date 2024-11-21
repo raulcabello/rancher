@@ -66,6 +66,7 @@ func AdditionalAPIs(ctx context.Context, config *wrangler.Context, steve *steve.
 
 	go func() {
 		// TODO wait for settings.ServerURL.Get() populated. Find a better way for this!
+		// TODO it won't work Rancher is restarted once after first login!
 		time.Sleep(5 * time.Second)
 		// TODO is there a better way of exposing the oidc provider endpoints?
 		oidcprovider.RegisterOIDCProviderHandles(mux)

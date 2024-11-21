@@ -7,6 +7,7 @@ import (
 	"github.com/rancher/rancher/pkg/auth/providers"
 	"github.com/rancher/rancher/pkg/auth/providers/keycloakoidc"
 	"github.com/rancher/rancher/pkg/auth/providers/ldap"
+	"github.com/rancher/rancher/pkg/auth/providers/saml"
 	"github.com/rancher/rancher/pkg/settings"
 	"io/ioutil"
 	"net/http"
@@ -51,6 +52,8 @@ func getActiveProvider() (authProvider, error) {
 		return newKeycloak(p), nil
 	case *ldap.LdapProvider:
 		return newLdapProvider(p), nil
+	case *saml.Provider:
+
 	}
 
 	return nil, fmt.Errorf("unsupported provider")
