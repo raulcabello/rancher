@@ -33,7 +33,7 @@ func (l *ldapProvider) ShowLoginPage(w http.ResponseWriter, r *http.Request) {
 	</head>
 	<body>
 		<h1>Login with LDAP</h1>
-		<form action="` + Host + `/authorize/callback" method="GET">
+		<form action="` + OIDCProviderHost() + `/authorize/callback" method="GET">
 			<label for="user">User:</label>
 			<input type="text" id="user" name="user" required>
 			<br><br>
@@ -75,7 +75,7 @@ func (l *ldapProvider) Login(r *http.Request) (*openid.DefaultSession, error) {
 		Username: userPrincipal.Name, // TODO rancher user name or principal from LDAP??
 		Subject:  userPrincipal.Name,
 		Claims: &jwt.IDTokenClaims{
-			Issuer:      Host,
+			Issuer:      OIDCProviderHost(),
 			Subject:     userPrincipal.Name,
 			Audience:    []string{"https://my-client.my-application.com"}, //TODO change!
 			ExpiresAt:   time.Now().Add(time.Hour * 6),

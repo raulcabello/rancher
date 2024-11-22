@@ -2,10 +2,6 @@ package steve
 
 import (
 	"context"
-	"github.com/rancher/rancher/pkg/oidcprovider"
-	"net/http"
-	"time"
-
 	gmux "github.com/gorilla/mux"
 	"github.com/rancher/rancher/pkg/api/steve/aggregation"
 	"github.com/rancher/rancher/pkg/api/steve/catalog"
@@ -16,9 +12,11 @@ import (
 	"github.com/rancher/rancher/pkg/capr/configserver"
 	"github.com/rancher/rancher/pkg/capr/installer"
 	"github.com/rancher/rancher/pkg/features"
+	"github.com/rancher/rancher/pkg/oidcprovider"
 	"github.com/rancher/rancher/pkg/settings"
 	"github.com/rancher/rancher/pkg/wrangler"
 	steve "github.com/rancher/steve/pkg/server"
+	"net/http"
 )
 
 func AdditionalAPIsPreMCM(config *wrangler.Context) func(http.Handler) http.Handler {
@@ -64,13 +62,8 @@ func AdditionalAPIs(ctx context.Context, config *wrangler.Context, steve *steve.
 	mux.Handle("/v1/github{path:.*}", githubHandler)
 	mux.Handle("/v3/connect", Tunnel(config))
 
-	go func() {
-		// TODO wait for settings.ServerURL.Get() populated. Find a better way for this!
-		// TODO it won't work Rancher is restarted once after first login!
-		time.Sleep(5 * time.Second)
-		// TODO is there a better way of exposing the oidc provider endpoints?
-		oidcprovider.RegisterOIDCProviderHandles(mux)
-	}()
+	// TODO is there a better way of exposing the oidc provider endpoints?
+	oidcprovider.RegisterOIDCProviderHandles(mux)
 
 	health.Register(mux)
 

@@ -23,6 +23,7 @@ func redirectAuth(rw http.ResponseWriter, req *http.Request) {
 	vars := mux.Vars(req)
 	state := vars["state"]
 	if strings.HasPrefix(state, "oidc-provider") {
+		// redirect to OIDC provider if flow was started by the OIDC provider
 		values, err := url.ParseQuery(req.URL.RawQuery)
 		if err != nil {
 			fmt.Println(err) //TODO
@@ -34,7 +35,7 @@ func redirectAuth(rw http.ResponseWriter, req *http.Request) {
 		}
 		// TODO using ::: as a separator is not safe!
 		split := strings.SplitN(state, ":::", 3)
-		http.Redirect(rw, req, oidcprovider.Host+"/authorize/callback?code="+code+"&response_type=code&redirect_uri=http://localhost:8000&client_id="+oidcprovider.ClientID+"&state="+split[1]+"&nonce="+split[2], http.StatusFound)
+		http.Redirect(rw, req, oidcprovider.OIDCProviderHost()+"/authorize/callback?code="+code+"&response_type=code&redirect_uri=http://localhost:8000&client_id="+oidcprovider.ClientID+"&state="+split[1]+"&nonce="+split[2], http.StatusFound)
 		return
 	} else {
 		bytes, err := base64.RawURLEncoding.DecodeString(vars["state"])

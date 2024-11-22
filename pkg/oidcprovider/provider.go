@@ -27,13 +27,11 @@ type authProvider interface {
 const ClientID = "oidc-client"
 
 var (
-	Host       string
 	privateKey *rsa.PrivateKey
 )
 
 // Initialize Fosite provider
 func newOAuth2Provider() fosite.OAuth2Provider {
-	Host = settings.ServerURL.Get() + "/oidc"
 	// This secret is being used to sign access and refresh tokens as well as
 	// authorization codes. It must be exactly 32 bytes long.
 	var secret = []byte("BimPY6GrQCX2cYPJi3b1jxxAlci2/cS")
@@ -131,10 +129,10 @@ func RegisterOIDCProviderHandles(mux *mux.Router) {
 	mux.HandleFunc("/oidc/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{
-			"issuer": "` + Host + `",
-			"authorization_endpoint": "` + Host + `/authorize",
-			"token_endpoint": "` + Host + `/token",
-			"jwks_uri": "` + Host + `/.well-known/jwks.json",
+			"issuer": "` + OIDCProviderHost() + `",
+			"authorization_endpoint": "` + OIDCProviderHost() + `/authorize",
+			"token_endpoint": "` + OIDCProviderHost() + `/token",
+			"jwks_uri": "` + OIDCProviderHost() + `/.well-known/jwks.json",
 			"response_types_supported": ["code"],
 			"subject_types_supported": ["public"],
 			"id_token_signing_alg_values_supported": ["RS256"]
@@ -172,6 +170,10 @@ func RegisterOIDCProviderHandles(mux *mux.Router) {
 		p.ShowLoginPage(w, r)
 	})
 
+}
+
+func OIDCProviderHost() string {
+	return settings.ServerURL.Get() + "/oidc"
 }
 
 // JWK represents a JSON Web Key

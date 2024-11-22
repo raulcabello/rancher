@@ -70,7 +70,7 @@ func (k *keycloak) Login(r *http.Request) (*openid.DefaultSession, error) {
 		Username: userClaimInfo.PreferredUsername,
 		Subject:  userClaimInfo.PreferredUsername,
 		Claims: &jwt.IDTokenClaims{
-			Issuer:      Host,
+			Issuer:      OIDCProviderHost(),
 			Nonce:       nonce,
 			Subject:     userClaimInfo.PreferredUsername,
 			Audience:    []string{"https://my-client.my-application.com"}, //TODO change!
