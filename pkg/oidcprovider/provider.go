@@ -11,11 +11,16 @@ import (
 	"github.com/ory/fosite/compose"
 	"github.com/ory/fosite/handler/openid"
 	"github.com/ory/fosite/storage"
-	"github.com/rancher/rancher/pkg/settings"
+	"github.com/ory/fosite/token/jwt"
+	"github.com/rancher/rancher/pkg/auth/providers"
+	"github.com/rancher/rancher/pkg/auth/tokens"
+	wrangmgmtv3 "github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io/v3"
 	"golang.org/x/crypto/bcrypt"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"log"
 	"math/big"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -44,6 +49,7 @@ func newOAuth2Provider() fosite.OAuth2Provider {
 		Secret: bytes,
 		RedirectURIs: []string{
 			"http://localhost:8000", // TODO harcoded for https://github.com/int128/kubelogin. Should be customizable!
+			"http://localhost:8088/callback",
 		},
 		GrantTypes:    []string{"authorization_code"},
 		ResponseTypes: []string{"code"},
@@ -67,21 +73,111 @@ func newOAuth2Provider() fosite.OAuth2Provider {
 	return oauth2Provider
 }
 
-func RegisterOIDCProviderHandles(mux *mux.Router) {
+func RegisterOIDCProviderHandles(mux *mux.Router, tokenCache wrangmgmtv3.TokenCache, userLister wrangmgmtv3.UserCache, userAttributeLister wrangmgmtv3.UserAttributeCache) {
 	oauth2Provider := newOAuth2Provider()
 
 	mux.HandleFunc("/oidc/authorize/callback", func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.TODO()
 
-		p, err := getActiveProvider()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+		/*	p, err := getActiveProvider()
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			session, err := p.Login(r)
+			if err != nil {
+				http.Error(w, "failed to login: "+err.Error(), http.StatusInternalServerError)
+				return
+			}*/
+		tokenAuthValue := tokens.GetTokenAuthFromRequest(r)
+		if tokenAuthValue == "" {
+			http.Error(w, "failed to authenticate ", http.StatusInternalServerError)
 			return
 		}
-		session, err := p.Login(r)
-		if err != nil {
-			http.Error(w, "failed to login: "+err.Error(), http.StatusInternalServerError)
+
+		tokenName, tokenKey := tokens.SplitTokenParts(tokenAuthValue)
+		if tokenName == "" || tokenKey == "" {
+			http.Error(w, "failed to authenticate ", http.StatusInternalServerError)
 			return
+		}
+
+		token, err := tokenCache.Get(tokenName)
+		if err != nil {
+			oauth2Provider.WriteAuthorizeError(ctx, w, nil, err)
+			return
+		}
+		if token.Token != tokenKey {
+			oauth2Provider.WriteAuthorizeError(ctx, w, nil, err)
+			return
+		}
+		if token.Enabled != nil && !*token.Enabled {
+			http.Error(w, "failed to authenticate ", http.StatusInternalServerError)
+			return
+		}
+		/*if token.ClusterName != "" && token.ClusterName != a.clusterRouter(req) {
+			http.Error(w, "failed to authenticate ", http.StatusInternalServerError)
+			return
+		}*/
+
+		// If the auth provider is specified make sure it exists and enabled.
+		if token.AuthProvider != "" {
+			disabled, err := providers.IsDisabledProvider(token.AuthProvider)
+			if err != nil {
+				http.Error(w, "failed to authenticate ", http.StatusInternalServerError)
+				return
+			}
+			if disabled {
+				http.Error(w, "failed to authenticate ", http.StatusInternalServerError)
+				return
+			}
+		}
+
+		attribs, err := userAttributeLister.Get(token.UserID)
+		if err != nil && !apierrors.IsNotFound(err) {
+			http.Error(w, "failed to authenticate ", http.StatusInternalServerError)
+			return
+		}
+
+		authUser, err := userLister.Get(token.UserID)
+		if err != nil {
+			http.Error(w, "failed to authenticate ", http.StatusInternalServerError)
+			return
+		}
+
+		if authUser.Enabled != nil && !*authUser.Enabled {
+			http.Error(w, "failed to authenticate ", http.StatusInternalServerError)
+			return
+		}
+
+		var groups []string
+		if attribs != nil {
+			for _, gps := range attribs.GroupPrincipals {
+				for _, principal := range gps.Items {
+					name := strings.TrimPrefix(principal.Name, "local://")
+					groups = append(groups, name)
+				}
+			}
+		}
+
+		var session = &openid.DefaultSession{
+			Username: token.UserID,
+			Subject:  token.UserID,
+			Claims: &jwt.IDTokenClaims{
+				Issuer:      OIDCProviderHost(),
+				Nonce:       "nonce",
+				Subject:     token.UserID,
+				Audience:    []string{"https://my-client.my-application.com"}, //TODO change!
+				ExpiresAt:   time.Now().Add(time.Hour * 6),
+				IssuedAt:    time.Now(),
+				RequestedAt: time.Now(),
+				AuthTime:    time.Now(),
+				/*	Extra: map[string]interface{}{
+					"groups": groups,
+				},*/
+			},
+			Headers: &jwt.Headers{
+				Extra: make(map[string]interface{}),
+			},
 		}
 		// Handle authorization request
 		authorizeRequest, err := oauth2Provider.NewAuthorizeRequest(ctx, r)
@@ -162,18 +258,22 @@ func RegisterOIDCProviderHandles(mux *mux.Router) {
 
 	// entry point for auth flow
 	mux.HandleFunc("/oidc/authorize", func(w http.ResponseWriter, r *http.Request) {
-		p, err := getActiveProvider()
+		//	http.Redirect(w, r, "https://localhost.localdomain:8005/auth/login?client_id=oidc-client&redirect_uri=http://localhost:8000&response_type=code&scope=openid+email+profile&state="+r.URL.Query().Get("state")+"&nonce="+r.URL.Query().Get("nonce"), http.StatusFound)
+		http.Redirect(w, r, "https://localhost.localdomain:8005/auth/login?client_id=oidc-client&redirect_uri=http://localhost:8088/callback&response_type=code&scope=openid+email+profile&state="+r.URL.Query().Get("state")+"&nonce="+r.URL.Query().Get("nonce"), http.StatusFound)
+
+		/*p, err := getActiveProvider()
 		if err != nil {
 			http.Error(w, "failed to get config", http.StatusInternalServerError)
 			return
 		}
-		p.ShowLoginPage(w, r)
+		p.ShowLoginPage(w, r)*/
 	})
 
 }
 
 func OIDCProviderHost() string {
-	return settings.ServerURL.Get() + "/oidc"
+	return "https://7b2262f0c09f.ngrok.app/oidc" //TODO
+	//return settings.ServerURL.Get() + "/oidc"
 }
 
 // JWK represents a JSON Web Key
