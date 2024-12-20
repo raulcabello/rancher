@@ -284,7 +284,7 @@ var (
 
 	// UIOfflinePreferred controls whether UI assets are served locally by the server container ('true') or from the remote URL defined in the ui-index and ui-dashboard-index settings ('false).
 	// The `dynamic` option will use remote assets for `-head` builds, otherwise the local assets for production builds.
-	UIOfflinePreferred = NewSetting("ui-offline-preferred", "dynamic")
+	UIOfflinePreferred = NewSetting("ui-offline-preferred", "Local") //TODO undo
 
 	// UIPath path within Rancher Manager where the old ember UI files are found.
 	UIPath = NewSetting("ui-path", "/usr/share/rancher/ui")
@@ -384,6 +384,7 @@ func init() {
 		value.Default = defaultValue
 		settings[name] = value
 	}
+	UIOfflinePreferred.Set("true") //TODO remove
 }
 
 // Provider is an interfaced used to get and set Settings.

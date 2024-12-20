@@ -2,6 +2,7 @@ package steve
 
 import (
 	"context"
+	"github.com/rancher/rancher/pkg/oidcprovider"
 	"net/http"
 
 	gmux "github.com/gorilla/mux"
@@ -61,6 +62,9 @@ func AdditionalAPIs(ctx context.Context, config *wrangler.Context, steve *steve.
 	}
 	mux.Handle("/v1/github{path:.*}", githubHandler)
 	mux.Handle("/v3/connect", Tunnel(config))
+
+	// TODO is there a better way of exposing the oidc provider endpoints?
+	oidcprovider.RegisterOIDCProviderHandles(mux, config.Mgmt.Token().Cache(), config.Mgmt.User().Cache(), config.Mgmt.UserAttribute().Cache())
 
 	health.Register(mux)
 

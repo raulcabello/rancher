@@ -206,11 +206,11 @@ RUN mkdir -p /usr/share/rancher/ui && \
     mkdir -p /usr/share/rancher/ui/api-ui && \
     cd /usr/share/rancher/ui/api-ui && \
     curl -sL https://releases.rancher.com/api-ui/${CATTLE_API_UI_VERSION}.tar.gz | tar xvzf - --strip-components=1 && \
-    mkdir -p /usr/share/rancher/ui-dashboard/dashboard && \
-    cd /usr/share/rancher/ui-dashboard/dashboard && \
-    curl -sL https://releases.rancher.com/dashboard/${CATTLE_DASHBOARD_UI_VERSION}.tar.gz | tar xvzf - --strip-components=2 && \
-    ln -s dashboard/index.html ../index.html && \
-    cd ../../ui/assets && \
+    mkdir -p /usr/share/rancher/ui-dashboard && \
+    cd /usr/share/rancher/ui-dashboard && \
+  #  curl -sL https://releases.rancher.com/dashboard/${CATTLE_DASHBOARD_UI_VERSION}.tar.gz | tar xvzf - --strip-components=2 && \
+  #  ln -s dashboard/index.html ../index.html && \
+    cd ../ui/assets && \
     curl -sfL ${CATTLE_SYSTEM_AGENT_DOWNLOAD_PREFIX}/${CATTLE_SYSTEM_AGENT_VERSION}/rancher-system-agent-arm64 -O && \
     curl -sfL ${CATTLE_SYSTEM_AGENT_DOWNLOAD_PREFIX}/${CATTLE_SYSTEM_AGENT_VERSION}/rancher-system-agent-amd64 -O && \
     curl -sfL ${CATTLE_SYSTEM_AGENT_INSTALL_SCRIPT} -o system-agent-install.sh && \
@@ -219,6 +219,8 @@ RUN mkdir -p /usr/share/rancher/ui && \
     curl -sfL https://acs-mirror.azureedge.net/csi-proxy/${CATTLE_CSI_PROXY_AGENT_VERSION}/binaries/csi-proxy-${CATTLE_CSI_PROXY_AGENT_VERSION}.tar.gz -O && \
     curl -sfL ${CATTLE_WINS_AGENT_INSTALL_SCRIPT} -o wins-agent-install.ps1 \
     curl -sfL ${CATTLE_WINS_AGENT_UNINSTALL_SCRIPT} -o wins-agent-uninstall.ps1
+
+COPY /uidist /usr/share/rancher/ui-dashboard
 
 ENV CATTLE_CLI_URL_DARWIN  https://releases.rancher.com/cli2/${CATTLE_CLI_VERSION}/rancher-darwin-amd64-${CATTLE_CLI_VERSION}.tar.gz
 ENV CATTLE_CLI_URL_LINUX   https://releases.rancher.com/cli2/${CATTLE_CLI_VERSION}/rancher-linux-amd64-${CATTLE_CLI_VERSION}.tar.gz
@@ -233,7 +235,7 @@ ENV ETCD_UNSUPPORTED_ARCH ${ETCD_UNSUPPORTED_ARCH}
 
 
 # Enable exporting of the k3s images as part of the build process.
-FROM --platform=$BUILDPLATFORM registry.suse.com/bci/golang:1.23 AS images
+FROM registry.suse.com/bci/golang:1.23 AS images
 
 ENV CATTLE_K3S_VERSION v1.31.1+k3s1
 
@@ -243,11 +245,11 @@ WORKDIR /src
 COPY hack/airgap/ /src/
 RUN go mod download
 
-RUN go build -tags k3s_export -o export-images ./...
-RUN ./export-images -k3s-version ${CATTLE_K3S_VERSION} -output /src/k3s-airgap-images.tar
+#RUN go build -tags k3s_export -o export-images ./...
+#RUN ./export-images -k3s-version ${CATTLE_K3S_VERSION} -output /src/k3s-airgap-images.tar
 
 
-FROM --platform=$BUILDPLATFORM registry.suse.com/bci/golang:1.23 AS build
+FROM registry.suse.com/bci/golang:1.23 AS build
 ARG VERSION
 ARG COMMIT
 ARG RKE_VERSION
@@ -281,8 +283,8 @@ ENV CATTLE_SERVER_IMAGE ${IMAGE_REPO}/rancher
 
 COPY --chown=root:root --chmod=0755 \
      --from=build /app/rancher /usr/bin/
-COPY --chown=root:root --chmod=0755 \
-     --from=images /src/k3s-airgap-images.tar /var/lib/rancher/k3s/agent/images/
+#COPY --chown=root:root --chmod=0755 \
+#     --from=images /src/k3s-airgap-images.tar /var/lib/rancher/k3s/agent/images/
 
 COPY --chown=root:root --chmod=0755 \
         package/loglevel \
