@@ -1,0 +1,2 @@
+"use strict";(self["webpackChunkdashboard"]=self["webpackChunkdashboard"]||[]).push([[2392],{12392:(e,r,s)=>{s.r(r),s.d(r,{default:()=>u});var t=s(77780),a=s(45848);const c={beforeCreate(){const e=!!this.$store.getters["management/schemaFor"](a.Mc.SETTING);return this.$router.replace({name:"c-cluster-product-resource",params:{...this.$route.params,product:t.NAME,resource:e?a.Mc.SETTING:a.Mc.FEATURE}})}},o=c,u=o}}]);
+//# sourceMappingURL=2392.be906ae4.js.map

@@ -1,0 +1,2 @@
+"use strict";(self["webpackChunkdashboard"]=self["webpackChunkdashboard"]||[]).push([[3391],{23391:(e,r,t)=>{t.r(r),t.d(r,{default:()=>d});var a=t(20641);function s(e,r,t,s,n,c){const o=(0,a.g2)("ResourceDetail");return(0,a.uX)(),(0,a.Wv)(o,{"component-testid":"cluster-manager-create"})}var n=t(71816);const c={name:"ClusterResourceCreate",components:{ResourceDetail:n.A}};var o=t(66262);const u=(0,o.A)(c,[["render",s]]),d=u}}]);
+//# sourceMappingURL=3391.1dc9a339.js.map

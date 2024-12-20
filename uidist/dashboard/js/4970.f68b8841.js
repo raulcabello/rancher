@@ -1,0 +1,2 @@
+"use strict";(self["webpackChunkdashboard"]=self["webpackChunkdashboard"]||[]).push([[4970],{84970:(e,r,s)=>{s.r(r),s.d(r,{default:()=>d});var a=s(20641);function n(e,r,s,n,t,u){const c=(0,a.g2)("ResourceDetail");return(0,a.uX)(),(0,a.Wv)(c)}var t=s(71816);const u={name:"ClusterResourcedId",components:{ResourceDetail:t.A}};var c=s(66262);const o=(0,c.A)(u,[["render",n]]),d=o}}]);
+//# sourceMappingURL=4970.f68b8841.js.map

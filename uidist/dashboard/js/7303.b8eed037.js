@@ -1,0 +1,2 @@
+"use strict";(self["webpackChunkdashboard"]=self["webpackChunkdashboard"]||[]).push([[7303],{47303:(e,r,a)=>{a.r(r),a.d(r,{default:()=>u});var o=a(20641);function s(e,r,a,s,n,t){const c=(0,o.g2)("ResourceDetail");return(0,o.uX)(),(0,o.Wv)(c,{"resource-override":"nodeDriver"})}var n=a(71816);const t={name:"NodeDriverEditPage",components:{ResourceDetail:n.A}};var c=a(66262);const d=(0,c.A)(t,[["render",s]]),u=d}}]);
+//# sourceMappingURL=7303.b8eed037.js.map

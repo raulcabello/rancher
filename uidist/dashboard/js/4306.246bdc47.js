@@ -1,0 +1,2 @@
+"use strict";(self["webpackChunkdashboard"]=self["webpackChunkdashboard"]||[]).push([[4306],{34306:(e,a,r)=>{r.r(a),r.d(a,{default:()=>d});var n=r(20641);function s(e,a,r,s,t,o){const c=(0,n.g2)("ResourceDetail");return(0,n.uX)(),(0,n.Wv)(c)}var t=r(71816);const o={name:"AlertmanagerConfig",components:{ResourceDetail:t.A}};var c=r(66262);const u=(0,c.A)(o,[["render",s]]),d=u}}]);
+//# sourceMappingURL=4306.246bdc47.js.map

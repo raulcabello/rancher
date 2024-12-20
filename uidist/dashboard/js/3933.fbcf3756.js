@@ -1,0 +1,2 @@
+"use strict";(self["webpackChunkdashboard"]=self["webpackChunkdashboard"]||[]).push([[3933],{63933:(r,e,o)=>{o.r(e),o.d(e,{default:()=>h});var s=o(20641);const a={class:"dashboard-root"};function t(r,e,o,t,n,d){return(0,s.uX)(),(0,s.CE)("div",a)}var n=o(32868);const d={mixins:[n.A],beforeMount(){this.$store.commit("setError",{error:new Error("404: This page could not be found")}),this.$router.replace("/fail-whale")}};var u=o(66262);const c=(0,u.A)(d,[["render",t]]),h=c}}]);
+//# sourceMappingURL=3933.fbcf3756.js.map

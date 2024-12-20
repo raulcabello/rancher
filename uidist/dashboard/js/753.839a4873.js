@@ -1,0 +1,2 @@
+"use strict";(self["webpackChunkdashboard"]=self["webpackChunkdashboard"]||[]).push([[753],{50753:(e,r,s)=>{s.r(r),s.d(r,{default:()=>u});var t=s(19314);const a={fetch({store:e,redirect:r}){const s=e.getters["defaultClusterId"];r(s?{name:"c-cluster",params:{cluster:s}}:{name:"c-cluster-product",params:{cluster:"local",product:t.NAME}})}},c=a,u=c}}]);
+//# sourceMappingURL=753.839a4873.js.map

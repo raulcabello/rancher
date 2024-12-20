@@ -1,0 +1,2 @@
+"use strict";(self["webpackChunkdashboard"]=self["webpackChunkdashboard"]||[]).push([[3938],{63938:(r,e,t)=>{t.r(e),t.d(e,{fetchClusterResources:()=>c});var s=t(96763);async function c(r,e,t={}){const c=r.getters["cluster/schemaFor"](e);if(c)try{const s=await r.dispatch("cluster/findAll",{type:e,opt:t});return s}catch(a){return s.error(`Failed fetching cluster resource ${e} with error:`,a),[]}return[]}}}]);
+//# sourceMappingURL=3938.51722776.js.map

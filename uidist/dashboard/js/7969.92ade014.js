@@ -1,0 +1,2 @@
+"use strict";(self["webpackChunkdashboard"]=self["webpackChunkdashboard"]||[]).push([[7969],{17969:(r,t,u)=>{u.r(t),u.d(t,{default:()=>c});var a=u(20641),d=u(90033);function e(r,t,u,e,o,s){return(0,a.uX)(),(0,a.CE)("div",null,"\n    Default dashboard for "+(0,d.toDisplayString)(s.product),1)}const o={computed:{product(){return this.$route.params.product}}};var s=u(66262);const n=(0,s.A)(o,[["render",e]]),c=n}}]);
+//# sourceMappingURL=7969.92ade014.js.map

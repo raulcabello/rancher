@@ -1,0 +1,2 @@
+"use strict";(self["webpackChunkdashboard"]=self["webpackChunkdashboard"]||[]).push([[2886],{92886:(e,s,r)=>{r.r(s),r.d(s,{default:()=>d});var a=r(20641);function n(e,s,r,n,o,c){const t=(0,a.g2)("ResourceDetail");return(0,a.uX)(),(0,a.Wv)(t)}var o=r(71816);const c={name:"RolesResourcedId",components:{ResourceDetail:o.A}};var t=r(66262);const u=(0,t.A)(c,[["render",n]]),d=u}}]);
+//# sourceMappingURL=2886.75885e30.js.map
