@@ -341,6 +341,9 @@ var (
 	// UnprivilegedJailUser controls whether jailed commands execute under a separate (unprivileged/non-root) user
 	// account. Setting it to false is only recommended for testing and development environments.
 	UnprivilegedJailUser = NewSetting("unprivileged-jail-user", "true")
+
+	// TODO remove
+	OIDCRedirectURI = NewSetting("oidc-callback-url", "http://localhost:8000")
 )
 
 // FullShellImage returns the full private registry name of the rancher shell image.

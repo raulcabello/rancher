@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"github.com/rancher/rancher/pkg/oidcprovider"
 
 	"github.com/rancher/rancher/pkg/auth/providerrefresh"
 	"github.com/rancher/rancher/pkg/auth/providers/azure"
@@ -55,6 +56,9 @@ func (c *SettingController) sync(key string, obj *v3.Setting) (runtime.Object, e
 		if err := c.ensureUserRetentionLabels(); err != nil {
 			logrus.Errorf("error updating retention labels for users: %v", err)
 		}
+	case settings.OIDCRedirectURI.Name:
+		oidcprovider.NewOAuth2Provider()
 	}
+
 	return nil, nil
 }

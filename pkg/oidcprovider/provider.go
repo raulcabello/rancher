@@ -25,23 +25,32 @@ import (
 	"time"
 )
 
-type authProvider interface {
-	ShowLoginPage(w http.ResponseWriter, r *http.Request)
-	Login(r *http.Request) (*openid.DefaultSession, error)
-}
-
 const ClientID = "oidc-client"
 
 var (
-	privateKey *rsa.PrivateKey
+	privateKey     *rsa.PrivateKey
+	oauth2Provider fosite.OAuth2Provider
 )
 
+func init() {
+	var err error
+	// Generate an RSA key for signing JWTs (ID tokens)
+	privateKey, err = rsa.GenerateKey(rand.Reader, 2048) //TODO key rotation
+	if err != nil {
+		log.Fatalf("failed to generate RSA key: %v", err)
+	}
+
+}
+
 // Initialize Fosite provider
-func newOAuth2Provider() fosite.OAuth2Provider {
+func NewOAuth2Provider() {
 	// This secret is being used to sign access and refresh tokens as well as
 	// authorization codes. It must be exactly 32 bytes long.
-	var secret = []byte("BimPY6GrQCX2cYPJi3b1jxxAlci2/cS")
+	var secret = []byte("BimPY6GrQCX2cYPJi3b1jxxAlci2/cS") //TODO rotation?
 	bytes, err := bcrypt.GenerateFromPassword([]byte(secret), 14)
+	if err != nil {
+		log.Fatalf("failed to generate secret: %v", err)
+	}
 
 	// In-memory storage for simplicity
 	store := storage.NewMemoryStore()
@@ -49,18 +58,11 @@ func newOAuth2Provider() fosite.OAuth2Provider {
 		ID:     ClientID,
 		Secret: bytes,
 		RedirectURIs: []string{
-			"http://localhost:8000", // TODO harcoded for https://github.com/int128/kubelogin. Should be customizable!
-			"http://localhost:8088/callback",
+			settings.OIDCRedirectURI.Get(),
 		},
 		GrantTypes:    []string{"authorization_code"},
 		ResponseTypes: []string{"code"},
 		Scopes:        []string{"openid", "profile", "email"},
-	}
-
-	// Generate an RSA key for signing JWTs (ID tokens)
-	privateKey, err = rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		log.Fatalf("failed to generate RSA key: %v", err)
 	}
 
 	// Setup the Fosite provider
@@ -69,27 +71,15 @@ func newOAuth2Provider() fosite.OAuth2Provider {
 		GlobalSecret:        bytes,
 	}
 
-	oauth2Provider := compose.ComposeAllEnabled(config, store, privateKey)
-
-	return oauth2Provider
+	oauth2Provider = compose.ComposeAllEnabled(config, store, privateKey)
 }
 
 func RegisterOIDCProviderHandles(mux *mux.Router, tokenCache wrangmgmtv3.TokenCache, userLister wrangmgmtv3.UserCache, userAttributeLister wrangmgmtv3.UserAttributeCache) {
-	oauth2Provider := newOAuth2Provider()
+	NewOAuth2Provider()
 
 	mux.HandleFunc("/oidc/authorize/callback", func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.TODO()
 
-		/*	p, err := getActiveProvider()
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			session, err := p.Login(r)
-			if err != nil {
-				http.Error(w, "failed to login: "+err.Error(), http.StatusInternalServerError)
-				return
-			}*/
 		tokenAuthValue := tokens.GetTokenAuthFromRequest(r)
 		if tokenAuthValue == "" {
 			http.Error(w, "failed to authenticate ", http.StatusInternalServerError)
@@ -115,10 +105,6 @@ func RegisterOIDCProviderHandles(mux *mux.Router, tokenCache wrangmgmtv3.TokenCa
 			http.Error(w, "failed to authenticate ", http.StatusInternalServerError)
 			return
 		}
-		/*if token.ClusterName != "" && token.ClusterName != a.clusterRouter(req) {
-			http.Error(w, "failed to authenticate ", http.StatusInternalServerError)
-			return
-		}*/
 
 		// If the auth provider is specified make sure it exists and enabled.
 		if token.AuthProvider != "" {
@@ -172,9 +158,9 @@ func RegisterOIDCProviderHandles(mux *mux.Router, tokenCache wrangmgmtv3.TokenCa
 				IssuedAt:    time.Now(),
 				RequestedAt: time.Now(),
 				AuthTime:    time.Now(),
-				/*	Extra: map[string]interface{}{
+				Extra: map[string]interface{}{
 					"groups": groups,
-				},*/
+				},
 			},
 			Headers: &jwt.Headers{
 				Extra: make(map[string]interface{}),
@@ -245,7 +231,7 @@ func RegisterOIDCProviderHandles(mux *mux.Router, tokenCache wrangmgmtv3.TokenCa
 				{
 					Kty: "RSA",
 					Use: "sig",
-					Kid: "unique-key-id", // Replace with a unique identifier for your key
+					Kid: "unique-key-id", // TODO Replace with a unique identifier for key
 					N:   n,
 					E:   e,
 				},
