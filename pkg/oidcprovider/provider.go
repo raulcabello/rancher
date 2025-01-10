@@ -246,16 +246,7 @@ func RegisterOIDCProviderHandles(mux *mux.Router, tokenCache wrangmgmtv3.TokenCa
 
 	// entry point for auth flow
 	mux.HandleFunc("/oidc/authorize", func(w http.ResponseWriter, r *http.Request) {
-		//TODO check if cookie is present, redirect and set http only cookie if domain is in list. To set cookie thirdparty app needs to implement https://xxx.com/set-rancher-cookie endpoint
-		//	http.Redirect(w, r, "https://localhost.localdomain:8005/auth/login?client_id=oidc-client&redirect_uri=http://localhost:8000&response_type=code&scope=openid+email+profile&state="+r.URL.Query().Get("state")+"&nonce="+r.URL.Query().Get("nonce"), http.StatusFound)
-		http.Redirect(w, r, settings.ServerURL.Get()+"/dashboard/auth/login?client_id=oidc-client&redirect_uri=http://localhost:8088/callback&response_type=code&scope=openid+email+profile&state="+r.URL.Query().Get("state")+"&nonce="+r.URL.Query().Get("nonce"), http.StatusFound)
-
-		/*p, err := getActiveProvider()
-		if err != nil {
-			http.Error(w, "failed to get config", http.StatusInternalServerError)
-			return
-		}
-		p.ShowLoginPage(w, r)*/
+		http.Redirect(w, r, settings.ServerURL.Get()+"/dashboard/auth/login?client_id=oidc-client&redirect_uri="+r.URL.Query().Get("redirect_uri")+"&response_type=code&scope=openid+email+profile&state="+r.URL.Query().Get("state")+"&nonce="+r.URL.Query().Get("nonce"), http.StatusFound)
 	})
 
 }
