@@ -9,6 +9,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/ory/fosite"
 	"github.com/ory/fosite/compose"
+	"github.com/ory/fosite/handler/oauth2"
 	"github.com/ory/fosite/handler/openid"
 	"github.com/ory/fosite/storage"
 	"github.com/ory/fosite/token/jwt"
@@ -58,11 +59,13 @@ func NewOAuth2Provider() {
 		ID:     ClientID,
 		Secret: bytes,
 		RedirectURIs: []string{
+			"http://localhost:8088/callback",
+			"http://localhost:8000",
 			settings.OIDCRedirectURI.Get(),
 		},
-		GrantTypes:    []string{"authorization_code"},
+		GrantTypes:    []string{"authorization_code", "refresh_token"},
 		ResponseTypes: []string{"code"},
-		Scopes:        []string{"openid", "profile", "email"},
+		Scopes:        []string{"openid", "profile", "email", "offline_access"},
 	}
 
 	// Setup the Fosite provider
@@ -72,6 +75,8 @@ func NewOAuth2Provider() {
 	}
 
 	oauth2Provider = compose.ComposeAllEnabled(config, store, privateKey)
+
+	// 	oauth2Provider = composeAll(config, store, privateKey)
 }
 
 func RegisterOIDCProviderHandles(mux *mux.Router, tokenCache wrangmgmtv3.TokenCache, userLister wrangmgmtv3.UserCache, userAttributeLister wrangmgmtv3.UserAttributeCache) {
@@ -146,24 +151,26 @@ func RegisterOIDCProviderHandles(mux *mux.Router, tokenCache wrangmgmtv3.TokenCa
 			}
 		}
 
-		var session = &openid.DefaultSession{
-			Username: token.UserID,
-			Subject:  token.UserID,
-			Claims: &jwt.IDTokenClaims{
-				Issuer:      OIDCProviderHost(),
-				Nonce:       "nonce",
-				Subject:     token.UserID,
-				Audience:    []string{"https://my-client.my-application.com"}, //TODO change!
-				ExpiresAt:   time.Now().Add(time.Hour * 6),
-				IssuedAt:    time.Now(),
-				RequestedAt: time.Now(),
-				AuthTime:    time.Now(),
-				Extra: map[string]interface{}{
-					"groups": groups,
+		var session = &OpenIDJWTSession{
+			openid.DefaultSession{
+				Username: token.UserID,
+				Subject:  token.UserID,
+				Claims: &jwt.IDTokenClaims{
+					Issuer:      OIDCProviderHost(),
+					Nonce:       "nonce",
+					Subject:     token.UserID,
+					Audience:    []string{"https://my-client.my-application.com"}, //TODO change!
+					ExpiresAt:   time.Now().Add(time.Hour * 6),
+					IssuedAt:    time.Now(),
+					RequestedAt: time.Now(),
+					AuthTime:    time.Now(),
+					Extra: map[string]interface{}{
+						"groups": groups,
+					},
 				},
-			},
-			Headers: &jwt.Headers{
-				Extra: make(map[string]interface{}),
+				Headers: &jwt.Headers{
+					Extra: make(map[string]interface{}),
+				},
 			},
 		}
 		// Handle authorization request
@@ -176,6 +183,7 @@ func RegisterOIDCProviderHandles(mux *mux.Router, tokenCache wrangmgmtv3.TokenCa
 		authorizeRequest.GrantScope("openid")
 		authorizeRequest.GrantScope("email")
 		authorizeRequest.GrantScope("profile")
+		authorizeRequest.GrantScope("offline_access")
 
 		// Validate client and issue an authorization code
 		response, err := oauth2Provider.NewAuthorizeResponse(ctx, authorizeRequest, session)
@@ -190,7 +198,7 @@ func RegisterOIDCProviderHandles(mux *mux.Router, tokenCache wrangmgmtv3.TokenCa
 	// /token endpoint
 	mux.HandleFunc("/oidc/token", func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.Background()
-		var mySession = &openid.DefaultSession{}
+		var mySession = NewOpenIDJWTSession()
 
 		// Handle token request
 		accessRequest, err := oauth2Provider.NewAccessRequest(ctx, r, mySession)
@@ -199,6 +207,7 @@ func RegisterOIDCProviderHandles(mux *mux.Router, tokenCache wrangmgmtv3.TokenCa
 			return
 		}
 
+		//TODO only check if grant is authorization code
 		response, err := oauth2Provider.NewAccessResponse(ctx, accessRequest)
 		if err != nil {
 			oauth2Provider.WriteAccessError(ctx, w, accessRequest, err)
@@ -247,7 +256,7 @@ func RegisterOIDCProviderHandles(mux *mux.Router, tokenCache wrangmgmtv3.TokenCa
 	mux.HandleFunc("/oidc/authorize", func(w http.ResponseWriter, r *http.Request) {
 		//TODO check if cookie is present, redirect and set http only cookie if domain is in list. To set cookie thirdparty app needs to implement https://xxx.com/set-rancher-cookie endpoint
 		//	http.Redirect(w, r, "https://localhost.localdomain:8005/auth/login?client_id=oidc-client&redirect_uri=http://localhost:8000&response_type=code&scope=openid+email+profile&state="+r.URL.Query().Get("state")+"&nonce="+r.URL.Query().Get("nonce"), http.StatusFound)
-		http.Redirect(w, r, settings.ServerURL.Get()+"/dashboard/auth/login?client_id=oidc-client&redirect_uri=http://localhost:8088/callback&response_type=code&scope=openid+email+profile&state="+r.URL.Query().Get("state")+"&nonce="+r.URL.Query().Get("nonce"), http.StatusFound)
+		http.Redirect(w, r, settings.ServerURL.Get()+"/dashboard/auth/login?client_id=oidc-client&redirect_uri="+r.URL.Query().Get("redirect_uri")+"&response_type=code&scope=openid+email+profile&state="+r.URL.Query().Get("state")+"&nonce="+r.URL.Query().Get("nonce"), http.StatusFound)
 
 		/*p, err := getActiveProvider()
 		if err != nil {
@@ -275,4 +284,74 @@ type JWK struct {
 // JWKS represents a JSON Web Key Set
 type JWKS struct {
 	Keys []JWK `json:"keys"`
+}
+
+// TODO only needed if we want jwt token in idToken
+func composeAll(config *fosite.Config, storage interface{}, key interface{}) fosite.OAuth2Provider {
+	keyGetter := func(context.Context) (interface{}, error) {
+		return key, nil
+	}
+	return compose.Compose(
+		config,
+		storage,
+		&compose.CommonStrategy{
+			CoreStrategy: compose.NewOAuth2JWTStrategy(func(ctx context.Context) (interface{}, error) {
+				return key, nil
+			}, compose.NewOAuth2HMACStrategy(config), config),
+			OpenIDConnectTokenStrategy: compose.NewOpenIDConnectStrategy(keyGetter, config),
+			Signer:                     &jwt.DefaultSigner{GetPrivateKey: keyGetter},
+		},
+		compose.OAuth2AuthorizeExplicitFactory,
+		compose.OAuth2AuthorizeImplicitFactory,
+		compose.OAuth2ClientCredentialsGrantFactory,
+		refreshStrategy,
+		compose.OAuth2ResourceOwnerPasswordCredentialsFactory,
+		compose.RFC7523AssertionGrantFactory,
+
+		compose.OpenIDConnectExplicitFactory,
+		compose.OpenIDConnectImplicitFactory,
+		compose.OpenIDConnectHybridFactory,
+		compose.OpenIDConnectRefreshFactory,
+
+		compose.OAuth2TokenIntrospectionFactory,
+		compose.OAuth2TokenRevocationFactory,
+
+		compose.OAuth2PKCEFactory,
+		compose.PushedAuthorizeHandlerFactory,
+	)
+}
+
+func refreshStrategy(config fosite.Configurator, storage interface{}, strategy interface{}) interface{} {
+	return &oauth2.RefreshTokenGrantHandler{
+		AccessTokenStrategy: compose.NewOAuth2JWTStrategy(func(ctx context.Context) (interface{}, error) {
+			return privateKey, nil
+		}, compose.NewOAuth2HMACStrategy(config), config),
+		RefreshTokenStrategy: compose.NewOAuth2JWTStrategy(func(ctx context.Context) (interface{}, error) {
+			return privateKey, nil
+		}, compose.NewOAuth2HMACStrategy(config), config),
+		TokenRevocationStorage: storage.(oauth2.TokenRevocationStorage),
+		Config:                 config,
+	}
+}
+
+type OpenIDJWTSession struct {
+	openid.DefaultSession
+}
+
+func (s *OpenIDJWTSession) GetJWTClaims() jwt.JWTClaimsContainer {
+	claims := &jwt.JWTClaims{}
+	if s.Claims != nil {
+		claims.FromMapClaims(s.Claims.ToMapClaims())
+	}
+	return claims
+}
+
+func (s *OpenIDJWTSession) GetJWTHeader() *jwt.Headers {
+	return s.IDTokenHeaders()
+}
+
+func NewOpenIDJWTSession() *OpenIDJWTSession {
+	return &OpenIDJWTSession{
+		*openid.NewDefaultSession(),
+	}
 }
