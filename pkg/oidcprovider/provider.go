@@ -58,6 +58,8 @@ func NewOAuth2Provider() {
 		ID:     ClientID,
 		Secret: bytes,
 		RedirectURIs: []string{
+			"http://localhost:8088/callback",
+			"http://localhost:8000",
 			settings.OIDCRedirectURI.Get(),
 		},
 		GrantTypes:    []string{"authorization_code"},
@@ -153,7 +155,6 @@ func RegisterOIDCProviderHandles(mux *mux.Router, tokenCache wrangmgmtv3.TokenCa
 				Issuer:      OIDCProviderHost(),
 				Nonce:       "nonce",
 				Subject:     token.UserID,
-				Audience:    []string{"https://my-client.my-application.com"}, //TODO change!
 				ExpiresAt:   time.Now().Add(time.Hour * 6),
 				IssuedAt:    time.Now(),
 				RequestedAt: time.Now(),
