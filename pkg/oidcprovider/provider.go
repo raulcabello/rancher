@@ -62,15 +62,16 @@ func NewOAuth2Provider() {
 			"http://localhost:8000",
 			settings.OIDCRedirectURI.Get(),
 		},
-		GrantTypes:    []string{"authorization_code"},
+		GrantTypes:    []string{"authorization_code", "refresh_token"},
 		ResponseTypes: []string{"code"},
-		Scopes:        []string{"openid", "profile", "email"},
+		Scopes:        []string{"openid", "profile", "email", "offline_access"},
 	}
 
 	// Setup the Fosite provider
 	config := &fosite.Config{
-		AccessTokenLifespan: time.Minute * 30,
-		GlobalSecret:        bytes,
+		AccessTokenLifespan:  time.Minute * 30,
+		RefreshTokenLifespan: time.Hour * 48,
+		GlobalSecret:         bytes,
 	}
 
 	oauth2Provider = compose.ComposeAllEnabled(config, store, privateKey)
@@ -178,6 +179,7 @@ func RegisterOIDCProviderHandles(mux *mux.Router, tokenCache wrangmgmtv3.TokenCa
 		authorizeRequest.GrantScope("openid")
 		authorizeRequest.GrantScope("email")
 		authorizeRequest.GrantScope("profile")
+		authorizeRequest.GrantScope("offline_access")
 
 		// Validate client and issue an authorization code
 		response, err := oauth2Provider.NewAuthorizeResponse(ctx, authorizeRequest, session)
