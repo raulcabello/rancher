@@ -160,7 +160,8 @@ func RegisterOIDCProviderHandles(mux *mux.Router, tokenCache wrangmgmtv3.TokenCa
 				RequestedAt: time.Now(),
 				AuthTime:    time.Now(),
 				Extra: map[string]interface{}{
-					"groups": groups,
+					"groups":             groups,
+					"preferred_username": authUser.DisplayName,
 				},
 			},
 			Headers: &jwt.Headers{
