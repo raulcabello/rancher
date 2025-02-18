@@ -14,6 +14,7 @@ import (
 	"github.com/rancher/rancher/pkg/capr/configserver"
 	"github.com/rancher/rancher/pkg/capr/installer"
 	"github.com/rancher/rancher/pkg/features"
+	"github.com/rancher/rancher/pkg/oidc"
 	"github.com/rancher/rancher/pkg/settings"
 	"github.com/rancher/rancher/pkg/wrangler"
 	steve "github.com/rancher/steve/pkg/server"
@@ -63,6 +64,10 @@ func AdditionalAPIs(ctx context.Context, config *wrangler.Context, steve *steve.
 	mux.Handle("/v3/connect", Tunnel(config))
 
 	health.Register(mux)
+
+	//TODO check feature flag!
+	p := oidc.NewProvider(ctx, config.Mgmt.Token().Cache(), config.Mgmt.User().Cache(), config.Mgmt.UserAttribute().Cache(), config.Core.Secret().Cache())
+	p.RegisterOIDCProviderHandles(mux)
 
 	return func(next http.Handler) http.Handler {
 		mux.NotFoundHandler = clusterAPI(next)
