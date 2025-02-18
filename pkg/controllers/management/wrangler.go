@@ -2,7 +2,6 @@ package management
 
 import (
 	"context"
-
 	"github.com/rancher/rancher/pkg/clustermanager"
 	"github.com/rancher/rancher/pkg/controllers/management/aks"
 	"github.com/rancher/rancher/pkg/controllers/management/authprovisioningv2"
@@ -30,6 +29,9 @@ func RegisterWrangler(ctx context.Context, wranglerContext *wrangler.Context, ma
 			return err
 		}
 	}
+
+	//TODO check feature flag!
+	//oidcprovider.Register(ctx, wranglerContext)
 
 	return nil
 }

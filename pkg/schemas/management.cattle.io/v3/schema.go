@@ -49,6 +49,7 @@ var (
 		Init(encryptionTypes).
 		Init(fleetTypes).
 		Init(notificationTypes)
+	//	Init(oidcProviderTypes)
 
 	TokenSchemas = factory.Schemas(&Version).
 			Init(tokens)
@@ -724,4 +725,13 @@ func encryptionTypes(schemas *types.Schemas) *types.Schemas {
 
 func notificationTypes(schemas *types.Schemas) *types.Schemas {
 	return schemas.MustImport(&Version, v3.RancherUserNotification{})
+}
+
+func oidcProviderTypes(schemas *types.Schemas) *types.Schemas {
+	return schemas.MustImportAndCustomize(&Version, v3.OIDCClient{}, func(s *types.Schema) {
+		s.MustCustomizeField("status", func(field types.Field) types.Field {
+			field.Nullable = false
+			return field
+		})
+	})
 }
