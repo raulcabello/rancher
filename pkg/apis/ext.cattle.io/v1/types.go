@@ -1,7 +1,10 @@
 // +kubebuilder:skip
 package v1
 
-import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"time"
+)
 
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -15,8 +18,8 @@ type OIDCClient struct {
 }
 
 type OIDCClientSpec struct {
-	Secret               string      `json:"secret"`
-	RedirectURIs         []string    `json:"redirectURIs"`
-	TokeLifeSpan         metav1.Time `json:"tokeLifeSpan"`
-	RefreshTokenLifeSpan metav1.Time `json:"refreshTokenLifeSpan"`
+	Secret               string        `json:"secret"`
+	RedirectURIs         []string      `json:"redirectURIs"`
+	TokeLifeSpan         time.Duration `json:"tokeLifeSpan"`
+	RefreshTokenLifeSpan time.Duration `json:"refreshTokenLifeSpan"`
 }

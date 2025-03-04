@@ -114,7 +114,7 @@ func (s *Store) Create(ctx context.Context, obj runtime.Object, createValidation
 			o, obj))
 	}
 
-	json, err := json.Marshal(oidcClient)
+	jsonBytes, err := json.Marshal(oidcClient)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +125,7 @@ func (s *Store) Create(ctx context.Context, obj runtime.Object, createValidation
 			Namespace: namespace,
 		},
 		Data: map[string][]byte{
-			secretKey: json,
+			secretKey: jsonBytes,
 		},
 	}
 
@@ -196,7 +196,17 @@ func (s *Store) ConvertToTable(
 		GVR.GroupResource())
 }
 
-func (s *Store) GetFromCache(name string) (*extv1.OIDCClient, error) {
+type StoreCache struct {
+	secretCache v1.SecretCache
+}
+
+func NewStoreCache(secretCache v1.SecretCache) *StoreCache {
+	return &StoreCache{
+		secretCache: secretCache,
+	}
+}
+
+func (s *StoreCache) GetFromCache(name string) (*extv1.OIDCClient, error) {
 	secret, err := s.secretCache.Get(namespace, name)
 	if err != nil {
 		return nil, err
@@ -211,7 +221,7 @@ func (s *Store) GetFromCache(name string) (*extv1.OIDCClient, error) {
 	return oidcClient, nil
 }
 
-func (s *Store) ListFromCache() (runtime.Object, error) {
+func (s *StoreCache) ListFromCache() (*extv1.OIDCClientList, error) {
 	secrets, err := s.secretCache.List(namespace, labels.Everything())
 	if err != nil {
 		return nil, apierrors.NewInternalError(err)
@@ -219,7 +229,7 @@ func (s *Store) ListFromCache() (runtime.Object, error) {
 	oidcClientList := extv1.OIDCClientList{}
 	for _, secret := range secrets {
 		var oidcClient *extv1.OIDCClient
-		err = json.Unmarshal(secret.Data["oidcClient"], &oidcClient)
+		err = json.Unmarshal(secret.Data[secretKey], &oidcClient)
 		if err != nil {
 			return nil, apierrors.NewInternalError(err)
 		}
