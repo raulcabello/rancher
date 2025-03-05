@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	v1 "github.com/rancher/rancher/pkg/apis/ext.cattle.io/v1"
 	v3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/auth/providers"
 	"github.com/rancher/rancher/pkg/auth/tokens"
@@ -18,6 +19,7 @@ import (
 	"golang.org/x/oauth2"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/util/retry"
 	"net/http"
 	"net/url"
 	"slices"
@@ -25,18 +27,19 @@ import (
 	"time"
 )
 
-type signingKeyGetter interface {
+type SigningKeyGetter interface {
 	GetSigningKey() (*rsa.PrivateKey, string, error)
 	GetPublicKey(kid string) (*rsa.PublicKey, error)
 }
 
 type Handler struct {
 	tokenCache          wrangmgmtv3.TokenCache
+	tokenClient         wrangmgmtv3.TokenClient
 	userLister          wrangmgmtv3.UserCache
 	userAttributeLister wrangmgmtv3.UserAttributeCache
 	sessionStorage      session.Storage
 	oidcClientCache     *oidcclients.StoreCache
-	jwks                signingKeyGetter
+	jwks                SigningKeyGetter
 	now                 func() time.Time
 }
 
@@ -44,6 +47,7 @@ type TokenResponse struct {
 	IDToken      string `json:"id_token"`
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token,omitempty"`
+	ExpiresIn    int    `json:"expires_in"`
 	// TODO add expiry?
 }
 
@@ -54,9 +58,10 @@ type RefreshTokenClaims struct {
 	Scope            []string `json:"scope"`
 }
 
-func NewHandler(tokenCache wrangmgmtv3.TokenCache, userLister wrangmgmtv3.UserCache, userAttributeLister wrangmgmtv3.UserAttributeCache, sessionStorage session.Storage, jwks signingKeyGetter, oidcClientCache *oidcclients.StoreCache) *Handler {
+func NewHandler(tokenCache wrangmgmtv3.TokenCache, userLister wrangmgmtv3.UserCache, userAttributeLister wrangmgmtv3.UserAttributeCache, sessionStorage session.Storage, jwks SigningKeyGetter, oidcClientCache *oidcclients.StoreCache, tokenClient wrangmgmtv3.TokenClient) *Handler {
 	return &Handler{
 		tokenCache:          tokenCache,
+		tokenClient:         tokenClient,
 		userLister:          userLister,
 		userAttributeLister: userAttributeLister,
 		sessionStorage:      sessionStorage,
@@ -140,138 +145,7 @@ func (h *Handler) createTokenFromCode(r *http.Request) (TokenResponse, error) {
 		return TokenResponse{}, err
 	}
 
-	return h.createTokenResponse(rancherToken, session.ClientID, session.Nonce, session.Scope)
-
-}
-
-func (h *Handler) createTokenResponse(rancherToken *v3.Token, clientID string, nonce string, scopes []string) (TokenResponse, error) {
-	if rancherToken.Expired {
-		return TokenResponse{}, fmt.Errorf("rancher token is expired")
-	}
-	if rancherToken.Enabled == nil || !*rancherToken.Enabled {
-		return TokenResponse{}, fmt.Errorf("rancher token is disabled")
-	}
-	if rancherToken.AuthProvider != "" {
-		disabled, err := providers.IsDisabledProvider(rancherToken.AuthProvider)
-		if err != nil {
-			return TokenResponse{}, fmt.Errorf("can't check if auth provider is disabled: %v", err)
-		}
-		if disabled {
-			return TokenResponse{}, fmt.Errorf("auth provider is disabled")
-		}
-	}
-	user, err := h.userLister.Get(rancherToken.UserID)
-	if err != nil {
-		return TokenResponse{}, fmt.Errorf("can't get user: %v", err)
-	}
-	if user.Enabled != nil && !*user.Enabled {
-		return TokenResponse{}, fmt.Errorf("user is disabled")
-	}
-	attribs, err := h.userAttributeLister.Get(rancherToken.UserID)
-	if err != nil && !apierrors.IsNotFound(err) {
-		return TokenResponse{}, fmt.Errorf("can't get user attributes: %v", err)
-	}
-	var groups []string
-	if attribs != nil {
-		for _, gps := range attribs.GroupPrincipals {
-			for _, principal := range gps.Items {
-				name := strings.TrimPrefix(principal.Name, "local://")
-				groups = append(groups, name)
-			}
-		}
-	}
-	oidcClient, err := h.oidcClientCache.GetFromCache(clientID)
-	if err != nil {
-		return TokenResponse{}, fmt.Errorf("error retreiving OIDC client: %v", err)
-	}
-	key, kid, err := h.jwks.GetSigningKey()
-	if err != nil {
-		return TokenResponse{}, err
-	}
-
-	idClaims := jwt.MapClaims{
-		"aud":                []string{clientID},
-		"exp":                h.now().Add(oidcClient.Spec.TokeLifeSpan).Unix(),
-		"iss":                settings.ServerURL.Get() + "/oidc", //TODO
-		"iat":                h.now().Unix(),
-		"preferred_username": user.DisplayName,
-		"sub":                rancherToken.UserID,
-		"auth_provider":      rancherToken.AuthProvider,
-	}
-	if nonce != "" {
-		idClaims["nonce"] = nonce
-	}
-	if groups != nil {
-		idClaims["groups"] = groups
-	}
-	if rancherToken.AuthProvider != "" {
-		idClaims["auth_provider"] = rancherToken.AuthProvider
-	}
-	idToken := jwt.NewWithClaims(jwt.SigningMethodRS256, idClaims)
-	idToken.Header["kid"] = kid
-	idTokenString, err := idToken.SignedString(key)
-	if err != nil {
-		return TokenResponse{}, err
-	}
-
-	accessClaims := jwt.MapClaims{
-		"aud":   []string{clientID},
-		"exp":   h.now().Add(oidcClient.Spec.TokeLifeSpan).Unix(),
-		"iss":   settings.ServerURL.Get() + "/oidc", //TODO
-		"iat":   h.now().Unix(),
-		"sub":   rancherToken.UserID,
-		"scope": scopes, //TODO array fine here? or string needed?
-	}
-	if rancherToken.AuthProvider != "" {
-		accessClaims["auth_provider"] = rancherToken.AuthProvider
-	}
-	accessToken := jwt.NewWithClaims(jwt.SigningMethodRS256, accessClaims)
-	accessToken.Header["kid"] = kid
-
-	accessTokenString, err := accessToken.SignedString(key)
-	if err != nil {
-		return TokenResponse{}, err
-	}
-	resp := TokenResponse{
-		IDToken:     idTokenString,
-		AccessToken: accessTokenString,
-	}
-
-	if slices.Contains(scopes, "offline_access") {
-		hash := sha256.Sum256([]byte(rancherToken.Name))
-		rancherTokenHash := hex.EncodeToString(hash[:])
-		refreshTokenID, err := uuid.NewRandom()
-		if err != nil {
-			return TokenResponse{}, err
-		}
-		// TODO add refresh token id to rancher token for invalidation!
-		refreshClaims := jwt.MapClaims{
-			"aud":                []string{clientID},
-			"exp":                h.now().Add(oidcClient.Spec.RefreshTokenLifeSpan).Unix(),
-			"iat":                h.now().Unix(),
-			"sub":                rancherToken.UserID,
-			"rancher_token_hash": rancherTokenHash,
-			"scope":              scopes,
-			"id":                 refreshTokenID.String(),
-		}
-		if rancherToken.AuthProvider != "" {
-			refreshClaims["auth_provider"] = rancherToken.AuthProvider
-		}
-		refreshToken := jwt.NewWithClaims(jwt.SigningMethodRS256, refreshClaims)
-		refreshToken.Header["kid"] = kid
-		refreshTokenString, err := refreshToken.SignedString(key)
-		if err != nil {
-			return TokenResponse{}, err
-		}
-		resp.RefreshToken = refreshTokenString
-		if !slices.Contains(rancherToken.OIDCRefreshTokens, refreshTokenID.String()) {
-			rancherToken.OIDCRefreshTokens = append(rancherToken.OIDCRefreshTokens, refreshTokenID.String())
-			h.tokenClient
-			// TODO update token with retry!
-		}
-	}
-
-	return resp, nil
+	return h.createResponse(rancherToken, oidcClient, session.Nonce, session.Scope)
 }
 
 func (h *Handler) refreshToken(r *http.Request) (TokenResponse, error) {
@@ -320,6 +194,147 @@ func (h *Handler) refreshToken(r *http.Request) (TokenResponse, error) {
 		return TokenResponse{}, fmt.Errorf("can't find rancher token")
 	}
 
-	//TODO check audience
-	return h.createTokenResponse(rancherToken, claims.Audience[0], "", claims.Scope)
+	if len(claims.Audience) < 1 {
+		return TokenResponse{}, fmt.Errorf("can't find client in audience")
+	}
+	oidcClient, err := h.oidcClientCache.GetFromCache(claims.Audience[0])
+	if err != nil {
+		return TokenResponse{}, fmt.Errorf("error retreiving OIDC client from audience: %v", err)
+	}
+
+	return h.createResponse(rancherToken, oidcClient, "", claims.Scope)
+}
+
+func (h *Handler) createResponse(rancherToken *v3.Token, oidcClient *v1.OIDCClient, nonce string, scopes []string) (TokenResponse, error) {
+	if rancherToken.Expired {
+		return TokenResponse{}, fmt.Errorf("rancher token is expired")
+	}
+	if rancherToken.Enabled == nil || !*rancherToken.Enabled {
+		return TokenResponse{}, fmt.Errorf("rancher token is disabled")
+	}
+	if rancherToken.AuthProvider != "" {
+		disabled, err := providers.IsDisabledProvider(rancherToken.AuthProvider)
+		if err != nil {
+			return TokenResponse{}, fmt.Errorf("can't check if auth provider is disabled: %v", err)
+		}
+		if disabled {
+			return TokenResponse{}, fmt.Errorf("auth provider is disabled")
+		}
+	}
+	user, err := h.userLister.Get(rancherToken.UserID)
+	if err != nil {
+		return TokenResponse{}, fmt.Errorf("can't get user: %v", err)
+	}
+	if user.Enabled != nil && !*user.Enabled {
+		return TokenResponse{}, fmt.Errorf("user is disabled")
+	}
+	attribs, err := h.userAttributeLister.Get(rancherToken.UserID)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return TokenResponse{}, fmt.Errorf("can't get user attributes: %v", err)
+	}
+	var groups []string
+	if attribs != nil {
+		for _, gps := range attribs.GroupPrincipals {
+			for _, principal := range gps.Items {
+				name := strings.TrimPrefix(principal.Name, "local://")
+				groups = append(groups, name)
+			}
+		}
+	}
+	key, kid, err := h.jwks.GetSigningKey()
+	if err != nil {
+		return TokenResponse{}, err
+	}
+
+	idClaims := jwt.MapClaims{
+		"aud":                []string{oidcClient.Name},
+		"exp":                h.now().Add(oidcClient.Spec.TokeLifeSpan).Unix(),
+		"iss":                settings.ServerURL.Get() + "/oidc", //TODO
+		"iat":                h.now().Unix(),
+		"preferred_username": user.DisplayName,
+		"sub":                rancherToken.UserID,
+	}
+	if nonce != "" {
+		idClaims["nonce"] = nonce
+	}
+	if groups != nil {
+		idClaims["groups"] = groups
+	}
+	if rancherToken.AuthProvider != "" {
+		idClaims["auth_provider"] = rancherToken.AuthProvider
+	}
+	idToken := jwt.NewWithClaims(jwt.SigningMethodRS256, idClaims)
+	idToken.Header["kid"] = kid
+	idTokenString, err := idToken.SignedString(key)
+	if err != nil {
+		return TokenResponse{}, err
+	}
+
+	accessClaims := jwt.MapClaims{
+		"aud":   []string{oidcClient.Name},
+		"exp":   h.now().Add(oidcClient.Spec.TokeLifeSpan).Unix(),
+		"iss":   settings.ServerURL.Get() + "/oidc", //TODO
+		"iat":   h.now().Unix(),
+		"sub":   rancherToken.UserID,
+		"scope": scopes, //TODO array fine here? or string needed?
+	}
+	if rancherToken.AuthProvider != "" {
+		accessClaims["auth_provider"] = rancherToken.AuthProvider
+	}
+	accessToken := jwt.NewWithClaims(jwt.SigningMethodRS256, accessClaims)
+	accessToken.Header["kid"] = kid
+
+	accessTokenString, err := accessToken.SignedString(key)
+	if err != nil {
+		return TokenResponse{}, err
+	}
+	resp := TokenResponse{
+		IDToken:     idTokenString,
+		AccessToken: accessTokenString,
+	}
+
+	if slices.Contains(scopes, "offline_access") {
+		hash := sha256.Sum256([]byte(rancherToken.Name))
+		rancherTokenHash := hex.EncodeToString(hash[:])
+		refreshTokenID, err := uuid.NewRandom()
+		if err != nil {
+			return TokenResponse{}, err
+		}
+		// TODO add refresh token id to rancher token for invalidation!
+		refreshClaims := jwt.MapClaims{
+			"aud":                []string{oidcClient.Name},
+			"exp":                h.now().Add(oidcClient.Spec.RefreshTokenLifeSpan).Unix(),
+			"iat":                h.now().Unix(),
+			"sub":                rancherToken.UserID,
+			"rancher_token_hash": rancherTokenHash,
+			"scope":              scopes,
+			"id":                 refreshTokenID.String(),
+		}
+		if rancherToken.AuthProvider != "" {
+			refreshClaims["auth_provider"] = rancherToken.AuthProvider
+		}
+		refreshToken := jwt.NewWithClaims(jwt.SigningMethodRS256, refreshClaims)
+		refreshToken.Header["kid"] = kid
+		refreshTokenString, err := refreshToken.SignedString(key)
+		if err != nil {
+			return TokenResponse{}, err
+		}
+		resp.RefreshToken = refreshTokenString
+
+		if !slices.Contains(rancherToken.OIDCRefreshTokens, refreshTokenID.String()) {
+			err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				tokenFromCluster, err := h.tokenCache.Get(rancherToken.Name)
+				if err != nil {
+					return err
+				}
+				tokenFromCluster.OIDCRefreshTokens = append(rancherToken.OIDCRefreshTokens, refreshTokenID.String())
+				_, err = h.tokenClient.Update(tokenFromCluster)
+
+				return err
+			})
+		}
+	}
+
+	resp.ExpiresIn = int(oidcClient.Spec.TokeLifeSpan.Seconds())
+	return resp, nil
 }

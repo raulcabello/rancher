@@ -6778,6 +6778,11 @@ func (in *Token) DeepCopyInto(out *Token) {
 		*out = new(bool)
 		**out = **in
 	}
+	if in.OIDCRefreshTokens != nil {
+		in, out := &in.OIDCRefreshTokens, &out.OIDCRefreshTokens
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	return
 }
 

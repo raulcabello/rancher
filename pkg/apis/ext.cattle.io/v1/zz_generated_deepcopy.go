@@ -93,8 +93,6 @@ func (in *OIDCClientSpec) DeepCopyInto(out *OIDCClientSpec) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
-	in.TokeLifeSpan.DeepCopyInto(&out.TokeLifeSpan)
-	in.RefreshTokenLifeSpan.DeepCopyInto(&out.RefreshTokenLifeSpan)
 	return
 }
 

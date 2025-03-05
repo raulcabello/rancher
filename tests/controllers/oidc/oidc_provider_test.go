@@ -150,7 +150,7 @@ func (s *OIDCProviderSuite) SetupSuite() {
 	mux := gmux.NewRouter()
 	mux.UseEncodedPath()
 
-	p, err := oidc.NewProvider(context.TODO(), s.wranglerContext.Mgmt.Token().Cache(), s.wranglerContext.Mgmt.User().Cache(), s.wranglerContext.Mgmt.UserAttribute().Cache(), s.wranglerContext.Core.Secret().Cache(), s.wranglerContext.Core.Secret())
+	p, err := oidc.NewProvider(context.TODO(), s.wranglerContext.Mgmt.Token().Cache(), s.wranglerContext.Mgmt.Token(), s.wranglerContext.Mgmt.User().Cache(), s.wranglerContext.Mgmt.UserAttribute().Cache(), s.wranglerContext.Core.Secret().Cache(), s.wranglerContext.Core.Secret())
 	assert.NoError(s.T(), err)
 
 	p.RegisterOIDCProviderHandles(mux)
@@ -202,8 +202,10 @@ func (s *OIDCProviderSuite) TestLogin() {
 			Name: clientID,
 		},
 		Spec: extv1.OIDCClientSpec{
-			RedirectURIs: []string{s.server.URL + "/redirect"},
-			Secret:       clientSecret,
+			RedirectURIs:         []string{s.server.URL + "/redirect"},
+			Secret:               clientSecret,
+			TokeLifeSpan:         10 * time.Hour,
+			RefreshTokenLifeSpan: 36 * time.Hour,
 		},
 	}
 	jsonBytes, err := json.Marshal(&c)

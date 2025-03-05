@@ -21,7 +21,7 @@ type Provider struct {
 	tokenHandler *token.Handler
 }
 
-func NewProvider(ctx context.Context, tokenCache wrangmgmtv3.TokenCache, userLister wrangmgmtv3.UserCache, userAttributeLister wrangmgmtv3.UserAttributeCache, secretCache corecontrollers.SecretCache, secretClient corecontrollers.SecretClient) (Provider, error) {
+func NewProvider(ctx context.Context, tokenCache wrangmgmtv3.TokenCache, tokenClient wrangmgmtv3.TokenClient, userLister wrangmgmtv3.UserCache, userAttributeLister wrangmgmtv3.UserAttributeCache, secretCache corecontrollers.SecretCache, secretClient corecontrollers.SecretClient) (Provider, error) {
 	sessionStorage := session.NewMemoryStorage(ctx, 10*time.Minute) //TODO check idle timeout
 	jwks, err := jwks.NewHandler(secretCache, secretClient)
 	if err != nil {
@@ -32,7 +32,7 @@ func NewProvider(ctx context.Context, tokenCache wrangmgmtv3.TokenCache, userLis
 	return Provider{
 		jwksHandler:  jwks,
 		authHandler:  auth.NewHandler(tokenCache, userLister, sessionStorage, &session.WranglerCodeCreator{}, oidcClientCache),
-		tokenHandler: token.NewHandler(tokenCache, userLister, userAttributeLister, sessionStorage, jwks, oidcClientCache),
+		tokenHandler: token.NewHandler(tokenCache, userLister, userAttributeLister, sessionStorage, jwks, oidcClientCache, tokenClient),
 	}, nil
 }
 

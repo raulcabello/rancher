@@ -208,20 +208,22 @@ func schema_pkg_apis_extcattleio_v1_OIDCClientSpec(ref common.ReferenceCallback)
 					},
 					"tokeLifeSpan": {
 						SchemaProps: spec.SchemaProps{
-							Ref: ref("k8s.io/apimachinery/pkg/apis/meta/v1.Time"),
+							Default: 0,
+							Type:    []string{"integer"},
+							Format:  "int64",
 						},
 					},
 					"refreshTokenLifeSpan": {
 						SchemaProps: spec.SchemaProps{
-							Ref: ref("k8s.io/apimachinery/pkg/apis/meta/v1.Time"),
+							Default: 0,
+							Type:    []string{"integer"},
+							Format:  "int64",
 						},
 					},
 				},
 				Required: []string{"secret", "redirectURIs", "tokeLifeSpan", "refreshTokenLifeSpan"},
 			},
 		},
-		Dependencies: []string{
-			"k8s.io/apimachinery/pkg/apis/meta/v1.Time"},
 	}
 }
 
