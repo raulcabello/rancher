@@ -20,6 +20,6 @@ type OIDCClient struct {
 type OIDCClientSpec struct {
 	Secret               string        `json:"secret"`
 	RedirectURIs         []string      `json:"redirectURIs"`
-	TokeLifeSpan         time.Duration `json:"tokeLifeSpan"`
+	TokenLifeSpan        time.Duration `json:"tokenLifeSpan"`
 	RefreshTokenLifeSpan time.Duration `json:"refreshTokenLifeSpan"`
 }

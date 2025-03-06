@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/google/uuid"
 	v1 "github.com/rancher/rancher/pkg/apis/ext.cattle.io/v1"
 	v3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/auth/providers"
@@ -48,12 +47,10 @@ type TokenResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token,omitempty"`
 	ExpiresIn    int    `json:"expires_in"`
-	// TODO add expiry?
 }
 
 type RefreshTokenClaims struct {
 	jwt.RegisteredClaims
-	UserID           string   `json:"user_id"`
 	RancherTokenHash string   `json:"rancher_token_hash"`
 	Scope            []string `json:"scope"`
 }
@@ -175,7 +172,7 @@ func (h *Handler) refreshToken(r *http.Request) (TokenResponse, error) {
 	}
 
 	tokenList, err := h.tokenCache.List(labels.SelectorFromSet(map[string]string{
-		tokens.UserIDLabel: claims.UserID,
+		tokens.UserIDLabel: claims.Subject,
 	}))
 	if err != nil {
 		return TokenResponse{}, err
@@ -248,8 +245,8 @@ func (h *Handler) createResponse(rancherToken *v3.Token, oidcClient *v1.OIDCClie
 
 	idClaims := jwt.MapClaims{
 		"aud":                []string{oidcClient.Name},
-		"exp":                h.now().Add(oidcClient.Spec.TokeLifeSpan).Unix(),
-		"iss":                settings.ServerURL.Get() + "/oidc", //TODO
+		"exp":                h.now().Add(oidcClient.Spec.TokenLifeSpan).Unix(),
+		"iss":                settings.ServerURL.Get() + "/oidc",
 		"iat":                h.now().Unix(),
 		"preferred_username": user.DisplayName,
 		"sub":                rancherToken.UserID,
@@ -272,11 +269,11 @@ func (h *Handler) createResponse(rancherToken *v3.Token, oidcClient *v1.OIDCClie
 
 	accessClaims := jwt.MapClaims{
 		"aud":   []string{oidcClient.Name},
-		"exp":   h.now().Add(oidcClient.Spec.TokeLifeSpan).Unix(),
+		"exp":   h.now().Add(oidcClient.Spec.TokenLifeSpan).Unix(),
 		"iss":   settings.ServerURL.Get() + "/oidc", //TODO
 		"iat":   h.now().Unix(),
 		"sub":   rancherToken.UserID,
-		"scope": scopes, //TODO array fine here? or string needed?
+		"scope": scopes,
 	}
 	if rancherToken.AuthProvider != "" {
 		accessClaims["auth_provider"] = rancherToken.AuthProvider
@@ -296,11 +293,7 @@ func (h *Handler) createResponse(rancherToken *v3.Token, oidcClient *v1.OIDCClie
 	if slices.Contains(scopes, "offline_access") {
 		hash := sha256.Sum256([]byte(rancherToken.Name))
 		rancherTokenHash := hex.EncodeToString(hash[:])
-		refreshTokenID, err := uuid.NewRandom()
-		if err != nil {
-			return TokenResponse{}, err
-		}
-		// TODO add refresh token id to rancher token for invalidation!
+		refreshTokenID := oidcClient.Name + "-" + rancherToken.UserID
 		refreshClaims := jwt.MapClaims{
 			"aud":                []string{oidcClient.Name},
 			"exp":                h.now().Add(oidcClient.Spec.RefreshTokenLifeSpan).Unix(),
@@ -308,7 +301,7 @@ func (h *Handler) createResponse(rancherToken *v3.Token, oidcClient *v1.OIDCClie
 			"sub":                rancherToken.UserID,
 			"rancher_token_hash": rancherTokenHash,
 			"scope":              scopes,
-			"id":                 refreshTokenID.String(),
+			"id":                 refreshTokenID,
 		}
 		if rancherToken.AuthProvider != "" {
 			refreshClaims["auth_provider"] = rancherToken.AuthProvider
@@ -321,20 +314,23 @@ func (h *Handler) createResponse(rancherToken *v3.Token, oidcClient *v1.OIDCClie
 		}
 		resp.RefreshToken = refreshTokenString
 
-		if !slices.Contains(rancherToken.OIDCRefreshTokens, refreshTokenID.String()) {
+		if !slices.Contains(rancherToken.OIDCRefreshTokens, refreshTokenID) {
 			err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
 				tokenFromCluster, err := h.tokenCache.Get(rancherToken.Name)
 				if err != nil {
 					return err
 				}
-				tokenFromCluster.OIDCRefreshTokens = append(rancherToken.OIDCRefreshTokens, refreshTokenID.String())
+				tokenFromCluster.OIDCRefreshTokens = append(rancherToken.OIDCRefreshTokens, refreshTokenID)
 				_, err = h.tokenClient.Update(tokenFromCluster)
 
 				return err
 			})
+			if err != nil {
+				return TokenResponse{}, err
+			}
 		}
 	}
 
-	resp.ExpiresIn = int(oidcClient.Spec.TokeLifeSpan.Seconds())
+	resp.ExpiresIn = int(oidcClient.Spec.TokenLifeSpan.Seconds())
 	return resp, nil
 }

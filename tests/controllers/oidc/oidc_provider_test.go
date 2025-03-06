@@ -204,7 +204,7 @@ func (s *OIDCProviderSuite) TestLogin() {
 		Spec: extv1.OIDCClientSpec{
 			RedirectURIs:         []string{s.server.URL + "/redirect"},
 			Secret:               clientSecret,
-			TokeLifeSpan:         10 * time.Hour,
+			TokenLifeSpan:        10 * time.Hour,
 			RefreshTokenLifeSpan: 36 * time.Hour,
 		},
 	}
