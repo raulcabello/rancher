@@ -5,7 +5,6 @@ import (
 	v3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/auth/providers"
 	"github.com/rancher/rancher/pkg/auth/tokens"
-	"github.com/rancher/rancher/pkg/ext/oidcclients"
 	wrangmgmtv3 "github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/oidc/session"
 	"github.com/rancher/rancher/pkg/settings"
@@ -38,13 +37,13 @@ type CodeCreator interface {
 type Handler struct {
 	tokenCache      wrangmgmtv3.TokenCache
 	userLister      wrangmgmtv3.UserCache
-	oidcClientCache *oidcclients.StoreCache
+	oidcClientCache wrangmgmtv3.OIDCClientCache
 	storage         session.Storage
 	codeCreator     CodeCreator
 	now             func() time.Time
 }
 
-func NewHandler(tokenCache wrangmgmtv3.TokenCache, userLister wrangmgmtv3.UserCache, storage session.Storage, codeCreator CodeCreator, oidcClientCache *oidcclients.StoreCache) *Handler {
+func NewHandler(tokenCache wrangmgmtv3.TokenCache, userLister wrangmgmtv3.UserCache, storage session.Storage, codeCreator CodeCreator, oidcClientCache wrangmgmtv3.OIDCClientCache) *Handler {
 	return &Handler{
 		tokenCache:      tokenCache,
 		userLister:      userLister,
@@ -81,11 +80,17 @@ func (h *Handler) AuthEndpoint(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("missing redirect_uri"), http.StatusBadRequest)
 		return
 	}
-	oidcClient, err := h.oidcClientCache.GetFromCache(params.clientID)
+	oidcClients, err := h.oidcClientCache.GetByIndex("oidc.management.cattle.io/oidcclient-by-id", params.clientID) //TODO index const?
 	if err != nil {
 		http.Error(w, fmt.Sprintf("error retreiving OIDC client: %v", err), http.StatusBadRequest)
 		return
 	}
+	if len(oidcClients) == 0 {
+		http.Error(w, fmt.Sprintf("no OIDC client found: %v", err), http.StatusBadRequest)
+		return
+	}
+	oidcClient := oidcClients[0]
+
 	if !slices.Contains(oidcClient.Spec.RedirectURIs, params.redirectURI) {
 		http.Error(w, fmt.Sprintf("redirect_uri %s is not registered", params.redirectURI), http.StatusBadRequest)
 		return

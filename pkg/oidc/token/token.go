@@ -7,23 +7,27 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/golang-jwt/jwt/v5"
-	v1 "github.com/rancher/rancher/pkg/apis/ext.cattle.io/v1"
 	v3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/auth/providers"
 	"github.com/rancher/rancher/pkg/auth/tokens"
-	"github.com/rancher/rancher/pkg/ext/oidcclients"
 	wrangmgmtv3 "github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/oidc/session"
 	"github.com/rancher/rancher/pkg/settings"
+	corev1 "github.com/rancher/wrangler/v3/pkg/generated/controllers/core/v1"
 	"golang.org/x/oauth2"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/cache"
 	"net/http"
-	"net/url"
 	"slices"
 	"strings"
 	"time"
+)
+
+var (
+	defaultTokenLifeSpan        = 1 * time.Hour
+	defaultRefreshTokenLifeSpan = 36 * time.Hour
 )
 
 type SigningKeyGetter interface {
@@ -37,7 +41,9 @@ type Handler struct {
 	userLister          wrangmgmtv3.UserCache
 	userAttributeLister wrangmgmtv3.UserAttributeCache
 	sessionStorage      session.Storage
-	oidcClientCache     *oidcclients.StoreCache
+	oidcClientCache     wrangmgmtv3.OIDCClientCache
+	secretCache         corev1.SecretCache
+	oidcClientIndexer   cache.Indexer
 	jwks                SigningKeyGetter
 	now                 func() time.Time
 }
@@ -55,7 +61,15 @@ type RefreshTokenClaims struct {
 	Scope            []string `json:"scope"`
 }
 
-func NewHandler(tokenCache wrangmgmtv3.TokenCache, userLister wrangmgmtv3.UserCache, userAttributeLister wrangmgmtv3.UserAttributeCache, sessionStorage session.Storage, jwks SigningKeyGetter, oidcClientCache *oidcclients.StoreCache, tokenClient wrangmgmtv3.TokenClient) *Handler {
+func NewHandler(tokenCache wrangmgmtv3.TokenCache,
+	userLister wrangmgmtv3.UserCache,
+	userAttributeLister wrangmgmtv3.UserAttributeCache,
+	sessionStorage session.Storage,
+	jwks SigningKeyGetter,
+	oidcClientCache wrangmgmtv3.OIDCClientCache,
+	secretCache corev1.SecretCache,
+	tokenClient wrangmgmtv3.TokenClient) *Handler {
+
 	return &Handler{
 		tokenCache:          tokenCache,
 		tokenClient:         tokenClient,
@@ -64,6 +78,7 @@ func NewHandler(tokenCache wrangmgmtv3.TokenCache, userLister wrangmgmtv3.UserCa
 		sessionStorage:      sessionStorage,
 		jwks:                jwks,
 		oidcClientCache:     oidcClientCache,
+		secretCache:         secretCache,
 		now:                 time.Now,
 	}
 }
@@ -111,7 +126,7 @@ func (h *Handler) createTokenFromCode(r *http.Request) (TokenResponse, error) {
 	if err != nil {
 		return TokenResponse{}, err
 	}
-	var clientID, clientSecret string
+	var clientID, _ string
 	clientID, clientSecret, ok := r.BasicAuth()
 	if !ok {
 		clientID = r.FormValue("client_id")
@@ -120,17 +135,31 @@ func (h *Handler) createTokenFromCode(r *http.Request) (TokenResponse, error) {
 	if clientID != session.ClientID {
 		return TokenResponse{}, fmt.Errorf("invalid client_id")
 	}
-	oidcClient, err := h.oidcClientCache.GetFromCache(clientID)
+	oidcClients, err := h.oidcClientCache.GetByIndex("oidc.management.cattle.io/oidcclient-by-id", clientID) //TODO index const?
 	if err != nil {
 		return TokenResponse{}, fmt.Errorf("error retreiving OIDC client: %v", err)
 	}
-	clientSecretUnescaped, err := url.QueryUnescape(clientSecret)
-	if err != nil {
-		return TokenResponse{}, fmt.Errorf("can't unescape client secret: %v", err)
+	if len(oidcClients) == 0 {
+		return TokenResponse{}, fmt.Errorf("no OIDC clients found")
 	}
-	if oidcClient.Spec.Secret != clientSecretUnescaped {
+	oidcClient := oidcClients[0]
+
+	secret, err := h.secretCache.Get("cattle-oidc-clients", clientID)
+	if err != nil {
+		return TokenResponse{}, err
+	}
+	if string(secret.Data["client-secret"]) != clientSecret {
 		return TokenResponse{}, fmt.Errorf("invalid client secret")
 	}
+	/*	clientSecretUnescaped, err := url.QueryUnescape(clientSecret)
+			if err != nil {
+				return TokenResponse{}, fmt.Errorf("can't unescape client secret: %v", err)
+			}
+			//TODO get secret!
+		/*	if oidcClient.Spec.Secret != clientSecretUnescaped {
+				return TokenResponse{}, fmt.Errorf("invalid client secret")
+			}
+	*/
 
 	code_verifier := r.Form.Get("code_verifier")
 	if session.CodeChallenge != oauth2.S256ChallengeFromVerifier(code_verifier) {
@@ -194,7 +223,7 @@ func (h *Handler) refreshToken(r *http.Request) (TokenResponse, error) {
 	if len(claims.Audience) < 1 {
 		return TokenResponse{}, fmt.Errorf("can't find client in audience")
 	}
-	oidcClient, err := h.oidcClientCache.GetFromCache(claims.Audience[0])
+	oidcClient, err := h.oidcClientCache.Get(claims.Audience[0])
 	if err != nil {
 		return TokenResponse{}, fmt.Errorf("error retreiving OIDC client from audience: %v", err)
 	}
@@ -202,7 +231,7 @@ func (h *Handler) refreshToken(r *http.Request) (TokenResponse, error) {
 	return h.createResponse(rancherToken, oidcClient, "", claims.Scope)
 }
 
-func (h *Handler) createResponse(rancherToken *v3.Token, oidcClient *v1.OIDCClient, nonce string, scopes []string) (TokenResponse, error) {
+func (h *Handler) createResponse(rancherToken *v3.Token, oidcClient *v3.OIDCClient, nonce string, scopes []string) (TokenResponse, error) {
 	if rancherToken.Expired {
 		return TokenResponse{}, fmt.Errorf("rancher token is expired")
 	}
@@ -243,9 +272,18 @@ func (h *Handler) createResponse(rancherToken *v3.Token, oidcClient *v1.OIDCClie
 		return TokenResponse{}, err
 	}
 
+	tokenLifeSpan := defaultTokenLifeSpan
+	if oidcClient.Spec.TokenLifeSpan != nil {
+		tokenLifeSpan = *oidcClient.Spec.TokenLifeSpan
+	}
+	refreshTokenLifeSpan := defaultRefreshTokenLifeSpan
+	if oidcClient.Spec.RefreshTokenLifeSpan != nil {
+		refreshTokenLifeSpan = *oidcClient.Spec.RefreshTokenLifeSpan
+	}
+
 	idClaims := jwt.MapClaims{
 		"aud": []string{oidcClient.Name},
-		"exp": h.now().Add(oidcClient.Spec.TokenLifeSpan).Unix(),
+		"exp": h.now().Add(tokenLifeSpan).Unix(),
 		"iss": settings.ServerURL.Get() + "/oidc",
 		"iat": h.now().Unix(),
 		"sub": rancherToken.UserID,
@@ -271,7 +309,7 @@ func (h *Handler) createResponse(rancherToken *v3.Token, oidcClient *v1.OIDCClie
 
 	accessClaims := jwt.MapClaims{
 		"aud":   []string{oidcClient.Name},
-		"exp":   h.now().Add(oidcClient.Spec.TokenLifeSpan).Unix(),
+		"exp":   h.now().Add(tokenLifeSpan).Unix(),
 		"iss":   settings.ServerURL.Get() + "/oidc", //TODO
 		"iat":   h.now().Unix(),
 		"sub":   rancherToken.UserID,
@@ -298,7 +336,7 @@ func (h *Handler) createResponse(rancherToken *v3.Token, oidcClient *v1.OIDCClie
 		refreshTokenID := oidcClient.Name + "-" + rancherToken.UserID
 		refreshClaims := jwt.MapClaims{
 			"aud":                []string{oidcClient.Name},
-			"exp":                h.now().Add(oidcClient.Spec.RefreshTokenLifeSpan).Unix(),
+			"exp":                h.now().Add(refreshTokenLifeSpan).Unix(),
 			"iat":                h.now().Unix(),
 			"sub":                rancherToken.UserID,
 			"rancher_token_hash": rancherTokenHash,
@@ -321,7 +359,7 @@ func (h *Handler) createResponse(rancherToken *v3.Token, oidcClient *v1.OIDCClie
 		}
 	}
 
-	resp.ExpiresIn = int(oidcClient.Spec.TokenLifeSpan.Seconds())
+	resp.ExpiresIn = int(tokenLifeSpan.Seconds())
 
 	return resp, nil
 }

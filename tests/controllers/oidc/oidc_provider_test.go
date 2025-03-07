@@ -7,8 +7,8 @@ import (
 	"fmt"
 	goidc "github.com/coreos/go-oidc/v3/oidc"
 	gmux "github.com/gorilla/mux"
-	extv1 "github.com/rancher/rancher/pkg/apis/ext.cattle.io/v1"
 	apimgmtv3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
+	v3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/auth/providers"
 	providermocks "github.com/rancher/rancher/pkg/auth/providers/mocks"
 	"github.com/rancher/rancher/pkg/auth/tokens"
@@ -48,7 +48,7 @@ type OIDCProviderSuite struct {
 // Replace with your OIDC provider settings
 const (
 	clientID     = "oidc-client"
-	clientSecret = "BimPY6GrQCX2cYPJi3b1jxxAlci2/cS"
+	clientSecret = "BimPY6GrQCX2cYPJi3b1jxxAlci"
 )
 
 var (
@@ -150,7 +150,7 @@ func (s *OIDCProviderSuite) SetupSuite() {
 	mux := gmux.NewRouter()
 	mux.UseEncodedPath()
 
-	p, err := oidc.NewProvider(context.TODO(), s.wranglerContext.Mgmt.Token().Cache(), s.wranglerContext.Mgmt.Token(), s.wranglerContext.Mgmt.User().Cache(), s.wranglerContext.Mgmt.UserAttribute().Cache(), s.wranglerContext.Core.Secret().Cache(), s.wranglerContext.Core.Secret())
+	p, err := oidc.NewProvider(context.TODO(), s.wranglerContext.Mgmt.Token().Cache(), s.wranglerContext.Mgmt.Token(), s.wranglerContext.Mgmt.User().Cache(), s.wranglerContext.Mgmt.UserAttribute().Cache(), s.wranglerContext.Core.Secret().Cache(), s.wranglerContext.Core.Secret(), s.wranglerContext.Mgmt.OIDCClient().Cache(), s.wranglerContext.Mgmt.OIDCClient())
 	assert.NoError(s.T(), err)
 
 	p.RegisterOIDCProviderHandles(mux)
@@ -168,10 +168,11 @@ func (s *OIDCProviderSuite) TearDownSuite() {
 }
 
 const (
-	fakeTokenName  = "fake-token-name"
-	fakeTokenValue = "fake-token-value"
-	fakeUserID     = "fake-user-id"
-	fakeCode       = "fake-code"
+	fakeTokenName    = "fake-token-name"
+	fakeTokenValue   = "fake-token-value"
+	fakeUserID       = "fake-user-id"
+	fakeCode         = "fake-code"
+	fakeClientSecret = "fake-client-secret"
 )
 
 func (s *OIDCProviderSuite) TestLogin() {
@@ -197,19 +198,6 @@ func (s *OIDCProviderSuite) TestLogin() {
 		Enabled:      ptr.To(true),
 	})
 	assert.NoError(s.T(), err)
-	c := extv1.OIDCClient{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: clientID,
-		},
-		Spec: extv1.OIDCClientSpec{
-			RedirectURIs:         []string{s.server.URL + "/redirect"},
-			Secret:               clientSecret,
-			TokenLifeSpan:        10 * time.Hour,
-			RefreshTokenLifeSpan: 36 * time.Hour,
-		},
-	}
-	jsonBytes, err := json.Marshal(&c)
-	assert.NoError(s.T(), err)
 
 	_, err = s.wranglerContext.Core.Namespace().Create(&v1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
@@ -218,13 +206,25 @@ func (s *OIDCProviderSuite) TestLogin() {
 	})
 	assert.NoError(s.T(), err)
 
+	err = s.wranglerContext.Mgmt.OIDCClient().Informer().GetIndexer().Add(&v3.OIDCClient{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "oidc-client",
+		},
+		Spec: v3.OIDCClientSpec{
+			RedirectURIs: []string{s.server.URL + "/redirect"},
+		},
+		Status: v3.OIDCClientStatus{
+			ClientID: clientID,
+		},
+	})
+	assert.NoError(s.T(), err)
 	_, err = s.wranglerContext.Core.Secret().Create(&v1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      clientID,
 			Namespace: "cattle-oidc-clients",
 		},
-		Data: map[string][]byte{
-			"oidc-client": jsonBytes,
+		Data: map[string][]byte{ //TODO check!
+			"client-secret": []byte(clientSecret),
 		},
 	})
 	assert.NoError(s.T(), err)

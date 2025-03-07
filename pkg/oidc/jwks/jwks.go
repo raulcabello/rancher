@@ -29,7 +29,7 @@ type Handler struct {
 }
 
 func NewHandler(secretCache corecontrollers.SecretCache, secretClient corecontrollers.SecretClient) (*Handler, error) {
-	_, err := secretCache.Get(keySecretNamespace, keySecretName)
+	_, err := secretClient.Get(keySecretNamespace, keySecretName, metav1.GetOptions{})
 	if err != nil && !errors.IsNotFound(err) {
 		return nil, err
 	}

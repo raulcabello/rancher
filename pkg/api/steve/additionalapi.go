@@ -66,7 +66,7 @@ func AdditionalAPIs(ctx context.Context, config *wrangler.Context, steve *steve.
 	health.Register(mux)
 
 	//TODO check feature flag!
-	p, err := oidc.NewProvider(ctx, config.Mgmt.Token().Cache(), config.Mgmt.Token(), config.Mgmt.User().Cache(), config.Mgmt.UserAttribute().Cache(), config.Core.Secret().Cache(), config.Core.Secret())
+	p, err := oidc.NewProvider(ctx, config.Mgmt.Token().Cache(), config.Mgmt.Token(), config.Mgmt.User().Cache(), config.Mgmt.UserAttribute().Cache(), config.Core.Secret().Cache(), config.Core.Secret(), config.Mgmt.OIDCClient().Cache(), config.Mgmt.OIDCClient())
 	if err != nil {
 		return nil, err
 	}

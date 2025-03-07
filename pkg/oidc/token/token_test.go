@@ -18,11 +18,11 @@ import (
 	"github.com/rancher/rancher/pkg/auth/providers"
 	providermocks "github.com/rancher/rancher/pkg/auth/providers/mocks"
 	"github.com/rancher/rancher/pkg/auth/tokens"
-	"github.com/rancher/rancher/pkg/ext/oidcclients"
 	"github.com/rancher/rancher/pkg/oidc/mocks"
 	"github.com/rancher/rancher/pkg/settings"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/cache"
 	"time"
 
 	"github.com/rancher/rancher/pkg/oidc/session"
@@ -376,4 +376,17 @@ func TestTokenEndpoint(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TODO
+func newTestUserIndexer(indexed ...*v3.User) cache.Indexer {
+	indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{
+		userSearchIndex: userSearchIndexer,
+	})
+
+	for i := range indexed {
+		indexer.Add(indexed[i])
+	}
+
+	return indexer
 }

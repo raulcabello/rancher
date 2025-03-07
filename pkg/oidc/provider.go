@@ -3,7 +3,7 @@ package oidc
 import (
 	"context"
 	"github.com/gorilla/mux"
-	"github.com/rancher/rancher/pkg/ext/oidcclients"
+	v3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	wrangmgmtv3 "github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/oidc/auth"
 	"github.com/rancher/rancher/pkg/oidc/jwks"
@@ -11,9 +11,12 @@ import (
 	"github.com/rancher/rancher/pkg/oidc/token"
 	"github.com/rancher/rancher/pkg/settings"
 	corecontrollers "github.com/rancher/wrangler/v3/pkg/generated/controllers/core/v1"
+	"k8s.io/client-go/tools/cache"
 	"net/http"
 	"time"
 )
+
+const oidcClientByIDIndex = "oidc.management.cattle.io/oidcclient-by-id"
 
 type Provider struct {
 	jwksHandler  *jwks.Handler
@@ -21,18 +24,32 @@ type Provider struct {
 	tokenHandler *token.Handler
 }
 
-func NewProvider(ctx context.Context, tokenCache wrangmgmtv3.TokenCache, tokenClient wrangmgmtv3.TokenClient, userLister wrangmgmtv3.UserCache, userAttributeLister wrangmgmtv3.UserAttributeCache, secretCache corecontrollers.SecretCache, secretClient corecontrollers.SecretClient) (Provider, error) {
+func NewProvider(ctx context.Context, tokenCache wrangmgmtv3.TokenCache, tokenClient wrangmgmtv3.TokenClient, userLister wrangmgmtv3.UserCache, userAttributeLister wrangmgmtv3.UserAttributeCache, secretCache corecontrollers.SecretCache, secretClient corecontrollers.SecretClient, oidcClientCache wrangmgmtv3.OIDCClientCache, oidcClientController wrangmgmtv3.OIDCClientController) (Provider, error) {
 	sessionStorage := session.NewMemoryStorage(ctx, 10*time.Minute) //TODO check idle timeout
 	jwks, err := jwks.NewHandler(secretCache, secretClient)
 	if err != nil {
 		return Provider{}, err
 	}
-	oidcClientCache := oidcclients.NewStoreCache(secretCache)
+	oidcClientInformer := oidcClientController.Informer()
+	userIndexers := map[string]cache.IndexFunc{
+		oidcClientByIDIndex: func(obj interface{}) ([]string, error) {
+			o, ok := obj.(*v3.OIDCClient)
+			if !ok {
+				return []string{}, nil
+			}
+
+			return []string{o.Status.ClientID}, nil
+		},
+	}
+	err = oidcClientInformer.AddIndexers(userIndexers)
+	if err != nil {
+		return Provider{}, err
+	}
 
 	return Provider{
 		jwksHandler:  jwks,
 		authHandler:  auth.NewHandler(tokenCache, userLister, sessionStorage, &session.WranglerCodeCreator{}, oidcClientCache),
-		tokenHandler: token.NewHandler(tokenCache, userLister, userAttributeLister, sessionStorage, jwks, oidcClientCache, tokenClient),
+		tokenHandler: token.NewHandler(tokenCache, userLister, userAttributeLister, sessionStorage, jwks, oidcClientCache, secretCache, tokenClient),
 	}, nil
 }
 
@@ -57,7 +74,6 @@ func (p *Provider) RegisterOIDCProviderHandles(mux *mux.Router) {
 	mux.HandleFunc("/oidc/.well-known/jwks.json", p.jwksHandler.JWKSEndpoint)
 
 	mux.HandleFunc("/oidc/authorize", p.authHandler.AuthEndpoint)
-
 }
 
 func OIDCProviderHost() string {
