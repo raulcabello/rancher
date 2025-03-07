@@ -22,6 +22,7 @@ import (
 	"github.com/rancher/rancher/pkg/oidc/mocks"
 	"github.com/rancher/rancher/pkg/settings"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/types"
 	"time"
 
 	"github.com/rancher/rancher/pkg/oidc/session"
@@ -125,6 +126,7 @@ func TestTokenEndpoint(t *testing.T) {
 			},
 		},
 	}
+	fakeTokenList := []*v3.Token{fakeToken}
 	hash := sha256.Sum256([]byte(fakeTokenName))
 	rancherTokenHash := hex.EncodeToString(hash[:])
 	fakeRefreshToken := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
@@ -133,6 +135,7 @@ func TestTokenEndpoint(t *testing.T) {
 		"iat":                now.Unix(),
 		"sub":                fakeUserID,
 		"rancher_token_hash": rancherTokenHash,
+		"scope":              fakeScopesOfflineAccess,
 	})
 	fakeRefreshToken.Header["kid"] = fakeSigningKey
 	privateKey, _ = rsa.GenerateKey(rand.Reader, 2048)
@@ -165,11 +168,6 @@ func TestTokenEndpoint(t *testing.T) {
 				m.userLister.EXPECT().Get(fakeUserID).Return(fakeUser, nil)
 				m.useAttributeLister.EXPECT().Get(fakeUserID).Return(fakeUserAttributes, nil)
 				m.signingKeyGetter.EXPECT().GetSigningKey().Return(privateKey, fakeSigningKey, nil)
-
-				// register auth provider
-				mockProvider := providermocks.NewMockAuthProvider(ctrl)
-				mockProvider.EXPECT().IsDisabledProvider().Return(false, nil)
-				providers.Providers[fakeAuthProvider] = mockProvider
 			},
 			wantIdTokenClaims: &jwt.MapClaims{
 				"aud":                []interface{}{fakeClientID},
@@ -206,18 +204,20 @@ func TestTokenEndpoint(t *testing.T) {
 			mockSetup: func(m mockParams) {
 				m.storage.EXPECT().GetAndRemoveSession(fakeCode).Return(fakeSessionOfflineAccess, nil)
 				m.secretCache.EXPECT().Get("cattle-oidc-clients", fakeClientID).Return(fakeOidcClientSecret, nil)
-				m.tokenCache.EXPECT().Get(fakeTokenName).Return(fakeToken, nil).Times(2)
+				m.tokenCache.EXPECT().Get(fakeTokenName).Return(fakeToken, nil)
 				m.userLister.EXPECT().Get(fakeUserID).Return(fakeUser, nil)
 				m.useAttributeLister.EXPECT().Get(fakeUserID).Return(fakeUserAttributes, nil)
-				expectedTokenUpdate := fakeToken.DeepCopy()
-				expectedTokenUpdate.OIDCRefreshTokens = []string{fakeClientID + "-" + fakeUserID}
-				m.tokenClient.EXPECT().Update(expectedTokenUpdate).Return(expectedTokenUpdate, nil)
+				patch, _ := json.Marshal([]struct {
+					Op    string `json:"op"`
+					Path  string `json:"path"`
+					Value any    `json:"value"`
+				}{{
+					Op:    "add",
+					Path:  "/metadata/labels/" + fakeClientID,
+					Value: "true",
+				}})
+				m.tokenClient.EXPECT().Patch(fakeTokenName, types.JSONPatchType, patch).Return(fakeToken, nil)
 				m.signingKeyGetter.EXPECT().GetSigningKey().Return(privateKey, fakeSigningKey, nil)
-
-				// register auth provider
-				mockProvider := providermocks.NewMockAuthProvider(ctrl)
-				mockProvider.EXPECT().IsDisabledProvider().Return(false, nil)
-				providers.Providers[fakeAuthProvider] = mockProvider
 			},
 			wantIdTokenClaims: &jwt.MapClaims{
 				"aud":                []interface{}{fakeClientID},
@@ -261,27 +261,24 @@ func TestTokenEndpoint(t *testing.T) {
 				return req
 			},
 			mockSetup: func(m mockParams) {
-				m.storage.EXPECT().GetAndRemoveSession(fakeCode).Return(fakeSession, nil)
 				m.secretCache.EXPECT().Get("cattle-oidc-clients", fakeClientID).Return(fakeOidcClientSecret, nil)
-				m.tokenCache.EXPECT().Get(fakeTokenName).Return(fakeToken, nil)
 				m.tokenCache.EXPECT().List(labels.SelectorFromSet(map[string]string{
 					tokens.UserIDLabel: fakeUserID,
-				})).Return([]*v3.Token{
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name: fakeTokenName,
-						},
-					},
-				}, nil)
+				})).Return(fakeTokenList, nil)
+				patch, _ := json.Marshal([]struct {
+					Op    string `json:"op"`
+					Path  string `json:"path"`
+					Value any    `json:"value"`
+				}{{
+					Op:    "add",
+					Path:  "/metadata/labels/" + fakeClientID,
+					Value: "true",
+				}})
+				m.tokenClient.EXPECT().Patch(fakeTokenName, types.JSONPatchType, patch).Return(fakeToken, nil)
 				m.userLister.EXPECT().Get(fakeUserID).Return(fakeUser, nil)
 				m.useAttributeLister.EXPECT().Get(fakeUserID).Return(fakeUserAttributes, nil)
 				m.signingKeyGetter.EXPECT().GetSigningKey().Return(privateKey, fakeSigningKey, nil)
 				m.signingKeyGetter.EXPECT().GetPublicKey(fakeSigningKey).Return(&privateKey.PublicKey, nil)
-
-				// register auth provider
-				mockProvider := providermocks.NewMockAuthProvider(ctrl)
-				mockProvider.EXPECT().IsDisabledProvider().Return(false, nil)
-				providers.Providers[fakeAuthProvider] = mockProvider
 			},
 			wantIdTokenClaims: &jwt.MapClaims{
 				"aud":                []interface{}{fakeClientID},
@@ -300,7 +297,17 @@ func TestTokenEndpoint(t *testing.T) {
 				"iat":           float64(fakeTime().Unix()),
 				"sub":           fakeUserID,
 				"auth_provider": fakeAuthProvider,
-				"scope":         fakeScopes,
+				"scope":         fakeScopesOfflineAccess,
+			},
+			wantRefreshTokenClaims: &jwt.MapClaims{
+				"aud":                []interface{}{fakeClientID},
+				"exp":                float64(fakeTime().Add(fakeRefreshTokenLifespan).Unix()),
+				"iat":                float64(fakeTime().Unix()),
+				"sub":                fakeUserID,
+				"auth_provider":      fakeAuthProvider,
+				"scope":              fakeScopesOfflineAccess,
+				"id":                 fakeClientID + "-" + fakeUserID,
+				"rancher_token_hash": rancherTokenHash,
 			},
 		},
 	}
@@ -308,6 +315,10 @@ func TestTokenEndpoint(t *testing.T) {
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
+			// register auth provider
+			mockProvider := providermocks.NewMockAuthProvider(ctrl)
+			mockProvider.EXPECT().IsDisabledProvider().Return(false, nil).AnyTimes()
+			providers.Providers[fakeAuthProvider] = mockProvider
 			m := mockParams{
 				tokenCache:         fake.NewMockNonNamespacedCacheInterface[*v3.Token](ctrl),
 				tokenClient:        fake.NewMockNonNamespacedClientInterface[*v3.Token, *v3.TokenList](ctrl),

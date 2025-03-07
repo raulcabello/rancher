@@ -206,7 +206,7 @@ func schema_pkg_apis_extcattleio_v1_OIDCClientSpec(ref common.ReferenceCallback)
 							},
 						},
 					},
-					"tokeLifeSpan": {
+					"tokenLifeSpan": {
 						SchemaProps: spec.SchemaProps{
 							Default: 0,
 							Type:    []string{"integer"},
@@ -221,7 +221,7 @@ func schema_pkg_apis_extcattleio_v1_OIDCClientSpec(ref common.ReferenceCallback)
 						},
 					},
 				},
-				Required: []string{"secret", "redirectURIs", "tokeLifeSpan", "refreshTokenLifeSpan"},
+				Required: []string{"secret", "redirectURIs", "tokenLifeSpan", "refreshTokenLifeSpan"},
 			},
 		},
 	}

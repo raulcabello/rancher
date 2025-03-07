@@ -18,7 +18,7 @@ import (
 	"golang.org/x/oauth2"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/client-go/util/retry"
+	"k8s.io/apimachinery/pkg/types"
 	"net/http"
 	"net/url"
 	"slices"
@@ -244,12 +244,14 @@ func (h *Handler) createResponse(rancherToken *v3.Token, oidcClient *v1.OIDCClie
 	}
 
 	idClaims := jwt.MapClaims{
-		"aud":                []string{oidcClient.Name},
-		"exp":                h.now().Add(oidcClient.Spec.TokenLifeSpan).Unix(),
-		"iss":                settings.ServerURL.Get() + "/oidc",
-		"iat":                h.now().Unix(),
-		"preferred_username": user.DisplayName,
-		"sub":                rancherToken.UserID,
+		"aud": []string{oidcClient.Name},
+		"exp": h.now().Add(oidcClient.Spec.TokenLifeSpan).Unix(),
+		"iss": settings.ServerURL.Get() + "/oidc",
+		"iat": h.now().Unix(),
+		"sub": rancherToken.UserID,
+	}
+	if slices.Contains(scopes, "profile") {
+		idClaims["preferred_username"] = user.DisplayName
 	}
 	if nonce != "" {
 		idClaims["nonce"] = nonce
@@ -314,23 +316,30 @@ func (h *Handler) createResponse(rancherToken *v3.Token, oidcClient *v1.OIDCClie
 		}
 		resp.RefreshToken = refreshTokenString
 
-		if !slices.Contains(rancherToken.OIDCRefreshTokens, refreshTokenID) {
-			err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
-				tokenFromCluster, err := h.tokenCache.Get(rancherToken.Name)
-				if err != nil {
-					return err
-				}
-				tokenFromCluster.OIDCRefreshTokens = append(rancherToken.OIDCRefreshTokens, refreshTokenID)
-				_, err = h.tokenClient.Update(tokenFromCluster)
-
-				return err
-			})
-			if err != nil {
-				return TokenResponse{}, err
-			}
+		if err := h.addOIDCClientIDToRancherToken(oidcClient.Name, rancherToken.Name); err != nil {
+			return TokenResponse{}, err
 		}
 	}
 
 	resp.ExpiresIn = int(oidcClient.Spec.TokenLifeSpan.Seconds())
+
 	return resp, nil
+}
+
+func (h *Handler) addOIDCClientIDToRancherToken(oidcClientName string, rancherTokenName string) error {
+	patch, err := json.Marshal([]struct {
+		Op    string `json:"op"`
+		Path  string `json:"path"`
+		Value any    `json:"value"`
+	}{{
+		Op:    "add",
+		Path:  "/metadata/labels/" + oidcClientName,
+		Value: "true",
+	}})
+	if err != nil {
+		return err
+	}
+	_, err = h.tokenClient.Patch(rancherTokenName, types.JSONPatchType, patch)
+
+	return err
 }
