@@ -134,7 +134,6 @@ func (h *Handler) getAndVerifyRancherTokenFromRequest(r *http.Request) (*v3.Toke
 		return nil, fmt.Errorf("can't split rancher token")
 
 	}
-	//TODO add ext tokens!
 	token, err := h.tokenCache.Get(tokenName)
 	if err != nil {
 		return nil, fmt.Errorf("can't get token: %v", err)

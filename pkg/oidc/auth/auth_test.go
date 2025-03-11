@@ -4,18 +4,12 @@
 package auth
 
 import (
-	"encoding/json"
-	extv1 "github.com/rancher/rancher/pkg/apis/ext.cattle.io/v1"
 	v3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
-	"github.com/rancher/rancher/pkg/ext/oidcclients"
-	wrangmgmtv3 "github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/oidc/mocks"
 	"github.com/rancher/rancher/pkg/oidc/session"
-	corecontrollers "github.com/rancher/wrangler/v3/pkg/generated/controllers/core/v1"
 	"github.com/rancher/wrangler/v3/pkg/generic/fake"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/mock/gomock"
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -34,71 +28,59 @@ func TestAuthEndpoint(t *testing.T) {
 		fakeCode        = "fake-code"
 		fakeRedirectUri = "https://www.rancher.com"
 		fakeClientID    = "client-id"
+		fakeClientName  = "client-name"
 	)
+	type mockParams struct {
+		tokenCache      *fake.MockNonNamespacedCacheInterface[*v3.Token]
+		userLister      *fake.MockNonNamespacedCacheInterface[*v3.User]
+		oidcClientCache *fake.MockNonNamespacedCacheInterface[*v3.OIDCClient]
+		codeCreator     *mocks.MockCodeCreator
+		storage         *mocks.MockStorage
+	}
 	fakeTime := time.Unix(0, 0)
 	ctrl := gomock.NewController(t)
 	tests := map[string]struct {
 		req          func() *http.Request
-		tokenCache   func() wrangmgmtv3.TokenCache
-		secretCache  func() corecontrollers.SecretCache
-		userLister   func() wrangmgmtv3.UserCache
-		storage      func() session.Storage
-		codeCreator  func() CodeCreator
+		mockSetup    func(mockParams)
 		wantRedirect string
 		wantHttpCode int
 		wantError    string
 	}{
 		"redirect with code when Rancher token in present": {
-			tokenCache: func() wrangmgmtv3.TokenCache {
-				mock := fake.NewMockNonNamespacedCacheInterface[*v3.Token](ctrl)
-				mock.EXPECT().Get(fakeTokenName).Return(&v3.Token{
+			mockSetup: func(m mockParams) {
+				m.tokenCache.EXPECT().Get(fakeTokenName).Return(&v3.Token{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: fakeTokenName,
 					},
 					Token:  fakeTokenValue,
 					UserID: fakeUserID,
 				}, nil)
-				return mock
-			},
-			secretCache: func() corecontrollers.SecretCache {
-				mock := fake.NewMockCacheInterface[*v1.Secret](ctrl)
-				c := extv1.OIDCClient{
-					Spec: extv1.OIDCClientSpec{
-						RedirectURIs: []string{fakeRedirectUri},
-					},
-				}
-				jsonBytes, err := json.Marshal(&c)
-				mock.EXPECT().Get("cattle-oidc-clients", fakeClientID).Return(&v1.Secret{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: fakeClientID,
-					},
-					Data: map[string][]byte{
-						"oidc-client": jsonBytes,
-					},
-				}, err)
-				return mock
-			},
-			userLister: func() wrangmgmtv3.UserCache {
-				mock := fake.NewMockNonNamespacedCacheInterface[*v3.User](ctrl)
-				mock.EXPECT().Get(fakeUserID).Return(&v3.User{
+				m.userLister.EXPECT().Get(fakeUserID).Return(&v3.User{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: fakeUserID,
 					},
 				}, nil)
-
-				return mock
-			},
-			storage: func() session.Storage {
-				mock := mocks.NewMockStorage(ctrl)
-				mock.EXPECT().AddSession(fakeCode, session.Session{
+				m.storage.EXPECT().AddSession(fakeCode, session.Session{
 					ClientID:      fakeClientID,
 					TokenName:     fakeTokenName,
 					Scope:         []string{"openid"},
 					CodeChallenge: "code-challenge",
 					CreatedAt:     fakeTime,
 				})
-
-				return mock
+				m.oidcClientCache.EXPECT().GetByIndex("oidc.management.cattle.io/oidcclient-by-id", fakeClientID).Return([]*v3.OIDCClient{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: fakeClientName,
+						},
+						Spec: v3.OIDCClientSpec{
+							RedirectURIs: []string{fakeRedirectUri},
+						},
+						Status: v3.OIDCClientStatus{
+							ClientID: fakeClientID,
+						},
+					},
+				}, nil)
+				m.codeCreator.EXPECT().GenerateCode().Return(fakeCode, nil)
 			},
 			req: func() *http.Request {
 				req := &http.Request{
@@ -114,11 +96,6 @@ func TestAuthEndpoint(t *testing.T) {
 				}
 
 				return req
-			},
-			codeCreator: func() CodeCreator {
-				mock := mocks.NewMockCodeCreator(ctrl)
-				mock.EXPECT().GenerateCode().Return(fakeCode, nil)
-				return mock
 			},
 			wantHttpCode: http.StatusFound,
 			wantRedirect: fakeRedirectUri + "?code=fake-code&state=",
@@ -134,52 +111,25 @@ func TestAuthEndpoint(t *testing.T) {
 					Method: http.MethodGet,
 				}
 			},
-			tokenCache: func() wrangmgmtv3.TokenCache {
-				return fake.NewMockNonNamespacedCacheInterface[*v3.Token](ctrl)
-			},
-			userLister: func() wrangmgmtv3.UserCache {
-				return fake.NewMockNonNamespacedCacheInterface[*v3.User](ctrl)
-			},
-			storage: func() session.Storage {
-				return &session.MemoryStorage{}
-			},
-			secretCache: func() corecontrollers.SecretCache {
-				mock := fake.NewMockCacheInterface[*v1.Secret](ctrl)
-				c := extv1.OIDCClient{
-					Spec: extv1.OIDCClientSpec{
-						RedirectURIs: []string{fakeRedirectUri},
+			mockSetup: func(m mockParams) {
+				m.oidcClientCache.EXPECT().GetByIndex("oidc.management.cattle.io/oidcclient-by-id", fakeClientID).Return([]*v3.OIDCClient{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: fakeClientName,
+						},
+						Spec: v3.OIDCClientSpec{
+							RedirectURIs: []string{fakeRedirectUri},
+						},
+						Status: v3.OIDCClientStatus{
+							ClientID: fakeClientID,
+						},
 					},
-				}
-				jsonBytes, err := json.Marshal(&c)
-				mock.EXPECT().Get("cattle-oidc-clients", fakeClientID).Return(&v1.Secret{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: fakeClientID,
-					},
-					Data: map[string][]byte{
-						"oidc-client": jsonBytes,
-					},
-				}, err)
-				return mock
-			},
-			codeCreator: func() CodeCreator {
-				return mocks.NewMockCodeCreator(ctrl)
+				}, nil)
 			},
 			wantHttpCode: http.StatusFound,
 			wantRedirect: "/dashboard/auth/login?client_id=client-id&redirect_uri=https://www.rancher.com&response_type=code&scope=openid&state=&nonce=&code_challenge=code-challenge",
 		},
 		"response type not supported": {
-			tokenCache: func() wrangmgmtv3.TokenCache {
-				return fake.NewMockNonNamespacedCacheInterface[*v3.Token](ctrl)
-			},
-			secretCache: func() corecontrollers.SecretCache {
-				return fake.NewMockCacheInterface[*v1.Secret](ctrl)
-			},
-			userLister: func() wrangmgmtv3.UserCache {
-				return fake.NewMockNonNamespacedCacheInterface[*v3.User](ctrl)
-			},
-			storage: func() session.Storage {
-				return mocks.NewMockStorage(ctrl)
-			},
 			req: func() *http.Request {
 				req := &http.Request{
 					URL: &url.URL{
@@ -195,25 +145,10 @@ func TestAuthEndpoint(t *testing.T) {
 
 				return req
 			},
-			codeCreator: func() CodeCreator {
-				return mocks.NewMockCodeCreator(ctrl)
-			},
 			wantHttpCode: http.StatusBadRequest,
 			wantError:    "invalid response type none\n",
 		},
 		"code challenge method not supported": {
-			tokenCache: func() wrangmgmtv3.TokenCache {
-				return fake.NewMockNonNamespacedCacheInterface[*v3.Token](ctrl)
-			},
-			secretCache: func() corecontrollers.SecretCache {
-				return fake.NewMockCacheInterface[*v1.Secret](ctrl)
-			},
-			userLister: func() wrangmgmtv3.UserCache {
-				return fake.NewMockNonNamespacedCacheInterface[*v3.User](ctrl)
-			},
-			storage: func() session.Storage {
-				return mocks.NewMockStorage(ctrl)
-			},
 			req: func() *http.Request {
 				req := &http.Request{
 					URL: &url.URL{
@@ -229,25 +164,10 @@ func TestAuthEndpoint(t *testing.T) {
 
 				return req
 			},
-			codeCreator: func() CodeCreator {
-				return mocks.NewMockCodeCreator(ctrl)
-			},
 			wantHttpCode: http.StatusBadRequest,
 			wantError:    "challenge_method not supported, only S256 is supported\n",
 		},
 		"missing openid": {
-			tokenCache: func() wrangmgmtv3.TokenCache {
-				return fake.NewMockNonNamespacedCacheInterface[*v3.Token](ctrl)
-			},
-			secretCache: func() corecontrollers.SecretCache {
-				return fake.NewMockCacheInterface[*v1.Secret](ctrl)
-			},
-			userLister: func() wrangmgmtv3.UserCache {
-				return fake.NewMockNonNamespacedCacheInterface[*v3.User](ctrl)
-			},
-			storage: func() session.Storage {
-				return mocks.NewMockStorage(ctrl)
-			},
 			req: func() *http.Request {
 				req := &http.Request{
 					URL: &url.URL{
@@ -262,32 +182,17 @@ func TestAuthEndpoint(t *testing.T) {
 				}
 
 				return req
-			},
-			codeCreator: func() CodeCreator {
-				return mocks.NewMockCodeCreator(ctrl)
 			},
 			wantHttpCode: http.StatusBadRequest,
 			wantError:    "missing openid scope\n",
 		},
 		"missing code challenge": {
-			tokenCache: func() wrangmgmtv3.TokenCache {
-				return fake.NewMockNonNamespacedCacheInterface[*v3.Token](ctrl)
-			},
-			secretCache: func() corecontrollers.SecretCache {
-				return fake.NewMockCacheInterface[*v1.Secret](ctrl)
-			},
-			userLister: func() wrangmgmtv3.UserCache {
-				return fake.NewMockNonNamespacedCacheInterface[*v3.User](ctrl)
-			},
-			storage: func() session.Storage {
-				return mocks.NewMockStorage(ctrl)
-			},
 			req: func() *http.Request {
 				req := &http.Request{
 					URL: &url.URL{
 						Scheme:   "https",
 						Host:     "rancher.com",
-						RawQuery: "code_challenge_method=S256&response_type=code&client_id=client-id&scope=profile&redirect_uri=" + fakeRedirectUri,
+						RawQuery: "code_challenge_method=S256&response_type=code&client_id=client-id&scope=openid&redirect_uri=" + fakeRedirectUri,
 					},
 					Method: http.MethodGet,
 				}
@@ -297,25 +202,10 @@ func TestAuthEndpoint(t *testing.T) {
 
 				return req
 			},
-			codeCreator: func() CodeCreator {
-				return mocks.NewMockCodeCreator(ctrl)
-			},
 			wantHttpCode: http.StatusBadRequest,
-			wantError:    "missing code challenge\n",
+			wantError:    "missing code_challenge\n",
 		},
 		"missing redirect uri": {
-			tokenCache: func() wrangmgmtv3.TokenCache {
-				return fake.NewMockNonNamespacedCacheInterface[*v3.Token](ctrl)
-			},
-			secretCache: func() corecontrollers.SecretCache {
-				return fake.NewMockCacheInterface[*v1.Secret](ctrl)
-			},
-			userLister: func() wrangmgmtv3.UserCache {
-				return fake.NewMockNonNamespacedCacheInterface[*v3.User](ctrl)
-			},
-			storage: func() session.Storage {
-				return mocks.NewMockStorage(ctrl)
-			},
 			req: func() *http.Request {
 				req := &http.Request{
 					URL: &url.URL{
@@ -331,26 +221,12 @@ func TestAuthEndpoint(t *testing.T) {
 
 				return req
 			},
-			codeCreator: func() CodeCreator {
-				return mocks.NewMockCodeCreator(ctrl)
-			},
 			wantHttpCode: http.StatusBadRequest,
 			wantError:    "missing openid scope\n",
 		},
 		"oidc client not registered": {
-			tokenCache: func() wrangmgmtv3.TokenCache {
-				return fake.NewMockNonNamespacedCacheInterface[*v3.Token](ctrl)
-			},
-			secretCache: func() corecontrollers.SecretCache {
-				mock := fake.NewMockCacheInterface[*v1.Secret](ctrl)
-				mock.EXPECT().Get("cattle-oidc-clients", fakeClientID).Return(nil, errors.NewNotFound(schema.GroupResource{}, fakeClientID))
-				return mock
-			},
-			userLister: func() wrangmgmtv3.UserCache {
-				return fake.NewMockNonNamespacedCacheInterface[*v3.User](ctrl)
-			},
-			storage: func() session.Storage {
-				return mocks.NewMockStorage(ctrl)
+			mockSetup: func(m mockParams) {
+				m.oidcClientCache.EXPECT().GetByIndex("oidc.management.cattle.io/oidcclient-by-id", fakeClientID).Return(nil, errors.NewNotFound(schema.GroupResource{}, fakeClientID))
 			},
 			req: func() *http.Request {
 				req := &http.Request{
@@ -366,40 +242,25 @@ func TestAuthEndpoint(t *testing.T) {
 				}
 
 				return req
-			},
-			codeCreator: func() CodeCreator {
-				return mocks.NewMockCodeCreator(ctrl)
 			},
 			wantHttpCode: http.StatusBadRequest,
 			wantError:    "error retreiving OIDC client:  \"client-id\" not found\n",
 		},
 		"redirect uri not registed": {
-			tokenCache: func() wrangmgmtv3.TokenCache {
-				return fake.NewMockNonNamespacedCacheInterface[*v3.Token](ctrl)
-			},
-			secretCache: func() corecontrollers.SecretCache {
-				mock := fake.NewMockCacheInterface[*v1.Secret](ctrl)
-				c := extv1.OIDCClient{
-					Spec: extv1.OIDCClientSpec{
-						RedirectURIs: []string{"anotherRedirect"},
+			mockSetup: func(m mockParams) {
+				m.oidcClientCache.EXPECT().GetByIndex("oidc.management.cattle.io/oidcclient-by-id", fakeClientID).Return([]*v3.OIDCClient{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: fakeClientName,
+						},
+						Spec: v3.OIDCClientSpec{
+							RedirectURIs: []string{"anotherurl"},
+						},
+						Status: v3.OIDCClientStatus{
+							ClientID: fakeClientID,
+						},
 					},
-				}
-				jsonBytes, err := json.Marshal(&c)
-				mock.EXPECT().Get("cattle-oidc-clients", fakeClientID).Return(&v1.Secret{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: fakeClientID,
-					},
-					Data: map[string][]byte{
-						"oidc-client": jsonBytes,
-					},
-				}, err)
-				return mock
-			},
-			userLister: func() wrangmgmtv3.UserCache {
-				return fake.NewMockNonNamespacedCacheInterface[*v3.User](ctrl)
-			},
-			storage: func() session.Storage {
-				return mocks.NewMockStorage(ctrl)
+				}, nil)
 			},
 			req: func() *http.Request {
 				req := &http.Request{
@@ -415,9 +276,6 @@ func TestAuthEndpoint(t *testing.T) {
 				}
 
 				return req
-			},
-			codeCreator: func() CodeCreator {
-				return mocks.NewMockCodeCreator(ctrl)
 			},
 			wantHttpCode: http.StatusBadRequest,
 			wantError:    "redirect_uri https://www.rancher.com is not registered\n",
@@ -427,8 +285,17 @@ func TestAuthEndpoint(t *testing.T) {
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-
-			h := NewHandler(test.tokenCache(), test.userLister(), test.storage(), test.codeCreator(), oidcclients.NewStoreCache(test.secretCache()))
+			m := mockParams{
+				tokenCache:      fake.NewMockNonNamespacedCacheInterface[*v3.Token](ctrl),
+				userLister:      fake.NewMockNonNamespacedCacheInterface[*v3.User](ctrl),
+				oidcClientCache: fake.NewMockNonNamespacedCacheInterface[*v3.OIDCClient](ctrl),
+				storage:         mocks.NewMockStorage(ctrl),
+				codeCreator:     mocks.NewMockCodeCreator(ctrl),
+			}
+			if test.mockSetup != nil {
+				test.mockSetup(m)
+			}
+			h := NewHandler(m.tokenCache, m.userLister, m.storage, m.codeCreator, m.oidcClientCache)
 			h.now = func() time.Time {
 				return fakeTime
 			}
