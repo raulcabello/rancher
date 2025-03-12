@@ -48,7 +48,7 @@ func NewProvider(ctx context.Context, tokenCache wrangmgmtv3.TokenCache, tokenCl
 
 	return Provider{
 		jwksHandler:  jwks,
-		authHandler:  auth.NewHandler(tokenCache, userLister, sessionStorage, &session.WranglerCodeCreator{}, oidcClientCache),
+		authHandler:  auth.NewHandler(tokenCache, userLister, sessionStorage, &session.RandomStringCreator{}, oidcClientCache),
 		tokenHandler: token.NewHandler(tokenCache, userLister, userAttributeLister, sessionStorage, jwks, oidcClientCache, secretCache, tokenClient),
 	}, nil
 }

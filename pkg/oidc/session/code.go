@@ -1,9 +1,44 @@
 package session
 
-import "github.com/rancher/wrangler/v3/pkg/randomtoken"
+import (
+	"crypto/rand"
+	"math/big"
+)
 
-type WranglerCodeCreator struct{}
+const (
+	characters         = "bcdfghjklmnpqrstvwxz2456789"
+	clientIDLength     = 10
+	codeLength         = 56
+	clientSecretLength = 32
+	clientIDPrefix     = "client-"
+	codePrefix         = "code-"
+	clientSecretPrefix = "secret-"
+)
 
-func (w *WranglerCodeCreator) GenerateCode() (string, error) {
-	return randomtoken.Generate()
+type RandomStringCreator struct{}
+
+var charsLength = big.NewInt(int64(len(characters)))
+
+func (r *RandomStringCreator) GenerateClientID() (string, error) {
+	return r.generateRandomString(clientIDPrefix, clientIDLength)
+}
+
+func (r *RandomStringCreator) GenerateClientSecret() (string, error) {
+	return r.generateRandomString(clientSecretPrefix, clientSecretLength)
+}
+
+func (r *RandomStringCreator) GenerateCode() (string, error) {
+	return r.generateRandomString(codePrefix, codeLength)
+}
+
+func (r *RandomStringCreator) generateRandomString(prefix string, length int) (string, error) {
+	token := make([]byte, length)
+	for i := range token {
+		r, err := rand.Int(rand.Reader, charsLength)
+		if err != nil {
+			return "", err
+		}
+		token[i] = characters[r.Int64()]
+	}
+	return prefix + string(token), nil
 }

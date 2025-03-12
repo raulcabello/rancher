@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	v3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	wrangmgmtv3 "github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io/v3"
+	"github.com/rancher/rancher/pkg/oidc/session"
 	"github.com/rancher/rancher/pkg/wrangler"
 	corev1 "github.com/rancher/wrangler/v3/pkg/generated/controllers/core/v1"
 	v1 "k8s.io/api/core/v1"
@@ -32,11 +33,20 @@ func (c *oidcClientController) onChange(_ string, oidcClient *v3.OIDCClient) (*v
 		return nil, nil
 	}
 
+	screator := &session.RandomStringCreator{}
 	//TODO check clientID is not changed!
-	clientID := "client-id3"
-	clientSecret := "client-secret"
+	clientID, err := screator.GenerateClientID()
+	if err != nil {
+		return nil, err
+	}
+	// TODO return err if another clientID exists!
 
-	_, err := c.secretClient.Create(&v1.Secret{
+	clientSecret, err := screator.GenerateClientSecret()
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = c.secretClient.Create(&v1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      oidcClient.Name,
 			Namespace: "cattle-oidc-clients",
