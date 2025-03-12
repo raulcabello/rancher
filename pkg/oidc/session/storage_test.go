@@ -1,19 +1,34 @@
 package session
 
 import (
+	"encoding/json"
+	corev1 "github.com/rancher/wrangler/v3/pkg/generated/controllers/core/v1"
+	"github.com/rancher/wrangler/v3/pkg/generic/fake"
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/mock/gomock"
 	"golang.org/x/net/context"
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sync"
 	"testing"
 	"time"
 )
 
 func TestAddSession(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	const (
+		fakeCode = "fake-code"
+	)
+
 	tests := map[string]struct {
 		data           map[string]Session
 		inputSession   Session
 		inputCode      string
-		expectedData   map[string]Session
+		secretCache    func() corev1.SecretCache
+		secretClient   func(s Session) corev1.SecretClient
 		expectedErrMsg string
 	}{
 		"code is not present": {
@@ -21,27 +36,46 @@ func TestAddSession(t *testing.T) {
 			inputSession: Session{
 				ClientID: "client-id",
 			},
-			inputCode: "code",
-			expectedData: map[string]Session{
-				"code": {
-					ClientID: "client-id",
-				},
+			inputCode: fakeCode,
+			secretCache: func() corev1.SecretCache {
+				mock := fake.NewMockCacheInterface[*v1.Secret](ctrl)
+				mock.EXPECT().Get(namespace, fakeCode).Return(nil, errors.NewNotFound(schema.GroupResource{}, ""))
+
+				return mock
+			},
+			secretClient: func(s Session) corev1.SecretClient {
+				sessionBytes, _ := json.Marshal(s)
+				mock := fake.NewMockClientInterface[*v1.Secret, *v1.SecretList](ctrl)
+				mock.EXPECT().Create(&v1.Secret{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      fakeCode,
+						Namespace: namespace,
+						Labels: map[string]string{
+							secretLabel: "true",
+						},
+					},
+					Data: map[string][]byte{
+						secretKey: sessionBytes,
+					},
+				}).Return(&v1.Secret{}, nil)
+
+				return mock
 			},
 		},
 		"code is already present": {
-			data: map[string]Session{
-				"code": {
-					ClientID: "client-id",
-				},
-			},
+			data: map[string]Session{},
 			inputSession: Session{
 				ClientID: "client-id",
 			},
-			inputCode: "code",
-			expectedData: map[string]Session{
-				"code": {
-					ClientID: "client-id",
-				},
+			inputCode: fakeCode,
+			secretCache: func() corev1.SecretCache {
+				mock := fake.NewMockCacheInterface[*v1.Secret](ctrl)
+				mock.EXPECT().Get(namespace, fakeCode).Return(&v1.Secret{}, nil)
+
+				return mock
+			},
+			secretClient: func(s Session) corev1.SecretClient {
+				return fake.NewMockClientInterface[*v1.Secret, *v1.SecretList](ctrl)
 			},
 			expectedErrMsg: "code already exists",
 		},
@@ -50,9 +84,10 @@ func TestAddSession(t *testing.T) {
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			storage := &MemoryStorage{
-				data:       test.data,
-				expiryTime: time.Hour,
+			storage := &SecretStorage{
+				secretCache:  test.secretCache(),
+				secretClient: test.secretClient(test.inputSession),
+				expiryTime:   time.Hour,
 			}
 
 			err := storage.AddSession(test.inputCode, test.inputSession)
@@ -62,49 +97,80 @@ func TestAddSession(t *testing.T) {
 			} else {
 				assert.EqualError(t, err, test.expectedErrMsg)
 			}
-			assert.Equal(t, test.expectedData, storage.data)
 		})
 	}
 }
 
 func TestGetAndRemoveSession(t *testing.T) {
+	ctrl := gomock.NewController(t)
 	now := time.Now()
+	fakeSession := Session{
+		ClientID:  "client-id",
+		TokenName: "token-name",
+		Nonce:     "nonce",
+		CreatedAt: now,
+	}
+	fakeCode := "code123"
 	tests := map[string]struct {
-		data            map[string]Session
+		secretClient    func() corev1.SecretClient
 		inputCode       string
-		expectedData    map[string]Session
 		expectedSession Session
 		expectedErrMsg  string
 	}{
 		"code is present": {
-			data: map[string]Session{
-				"code": {
-					ClientID:  "client-id",
-					CreatedAt: now,
-				},
+			inputCode:       fakeCode,
+			expectedSession: fakeSession,
+			secretClient: func() corev1.SecretClient {
+				mock := fake.NewMockClientInterface[*v1.Secret, *v1.SecretList](ctrl)
+				sessionBytes, _ := json.Marshal(fakeSession)
+				mock.EXPECT().Get(namespace, fakeCode, metav1.GetOptions{}).Return(&v1.Secret{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      fakeCode,
+						Namespace: namespace,
+						Labels: map[string]string{
+							secretLabel: "true",
+						},
+					},
+					Data: map[string][]byte{
+						secretKey: sessionBytes,
+					},
+				}, nil)
+				mock.EXPECT().Delete(namespace, fakeCode, &metav1.DeleteOptions{}).Return(nil)
+
+				return mock
 			},
-			inputCode: "code",
-			expectedSession: Session{
-				ClientID:  "client-id",
-				CreatedAt: now,
-			},
-			expectedData: map[string]Session{},
 		},
 		"code is not present": {
-			data:           map[string]Session{},
-			inputCode:      "code",
-			expectedData:   map[string]Session{},
+			inputCode: fakeCode,
+			secretClient: func() corev1.SecretClient {
+				mock := fake.NewMockClientInterface[*v1.Secret, *v1.SecretList](ctrl)
+				mock.EXPECT().Get(namespace, fakeCode, metav1.GetOptions{}).Return(nil, errors.NewNotFound(schema.GroupResource{}, "")).Times(4) // we retry four times
+
+				return mock
+			},
 			expectedErrMsg: "invalid code",
 		},
 		"code expired": {
-			data: map[string]Session{
-				"code": {
-					ClientID:  "client-id",
-					CreatedAt: time.Unix(0, 0),
-				},
+			inputCode: fakeCode,
+			secretClient: func() corev1.SecretClient {
+				mock := fake.NewMockClientInterface[*v1.Secret, *v1.SecretList](ctrl)
+				sessionBytes, _ := json.Marshal(Session{CreatedAt: time.Unix(0, 0)})
+				mock.EXPECT().Get(namespace, fakeCode, metav1.GetOptions{}).Return(&v1.Secret{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      fakeCode,
+						Namespace: namespace,
+						Labels: map[string]string{
+							secretLabel: "true",
+						},
+					},
+					Data: map[string][]byte{
+						secretKey: sessionBytes,
+					},
+				}, nil)
+				mock.EXPECT().Delete(namespace, fakeCode, &metav1.DeleteOptions{}).Return(nil)
+
+				return mock
 			},
-			inputCode:      "code",
-			expectedData:   map[string]Session{},
 			expectedErrMsg: "the code has expired",
 		},
 	}
@@ -112,9 +178,10 @@ func TestGetAndRemoveSession(t *testing.T) {
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			storage := &MemoryStorage{
-				data:       test.data,
-				expiryTime: time.Hour,
+			storage := &SecretStorage{
+				secretClient: test.secretClient(),
+				expiryTime:   time.Hour,
+				mu:           sync.Mutex{},
 			}
 
 			session, err := storage.GetAndRemoveSession(test.inputCode)
@@ -122,45 +189,82 @@ func TestGetAndRemoveSession(t *testing.T) {
 			if test.expectedErrMsg == "" {
 				assert.NoError(t, err)
 			} else {
-				assert.EqualError(t, err, test.expectedErrMsg)
+				assert.ErrorContains(t, err, test.expectedErrMsg)
 			}
-			assert.Equal(t, test.expectedSession, session)
-			assert.Equal(t, test.expectedData, storage.data)
+			assert.Equal(t, test.expectedSession.Nonce, session.Nonce)
+			assert.Equal(t, test.expectedSession.ClientID, session.ClientID)
+			assert.Equal(t, test.expectedSession.TokenName, session.TokenName)
+			assert.True(t, test.expectedSession.CreatedAt.Equal(session.CreatedAt))
 		})
 	}
 }
 
 func TestCleanUpExpiredSession(t *testing.T) {
-	now := time.Now()
+	ctrl := gomock.NewController(t)
+	sessionExpiredBytes, _ := json.Marshal(&Session{})
+	sessionNonExpired := &Session{
+		CreatedAt: time.Now(),
+	}
+	sessionNonExpiredBytes, _ := json.Marshal(sessionNonExpired)
+	sessionExpiredSecret := &v1.Secret{
+		Data: map[string][]byte{
+			secretKey: sessionExpiredBytes,
+		},
+	}
+	sessionNonExpiredSecret := &v1.Secret{
+		Data: map[string][]byte{
+			secretKey: sessionNonExpiredBytes,
+		},
+	}
+
 	tests := map[string]struct {
-		data         map[string]Session
-		expectedData map[string]Session
+		secretCache  func() corev1.SecretCache
+		secretClient func() corev1.SecretClient
 	}{
 		"remove expired session": {
-			data: map[string]Session{
-				"code": {
-					ClientID:  "client-id",
-					CreatedAt: time.Unix(0, 0),
-				},
+			secretCache: func() corev1.SecretCache {
+				mock := fake.NewMockCacheInterface[*v1.Secret](ctrl)
+				mock.EXPECT().List(namespace, labels.Set{secretLabel: "true"}.AsSelector()).Return([]*v1.Secret{
+					sessionExpiredSecret,
+				}, nil)
+
+				return mock
 			},
-			expectedData: map[string]Session{},
+			secretClient: func() corev1.SecretClient {
+				mock := fake.NewMockClientInterface[*v1.Secret, *v1.SecretList](ctrl)
+				mock.EXPECT().Delete(namespace, sessionExpiredSecret.Name, &metav1.DeleteOptions{}).Return(nil)
+
+				return mock
+			},
 		},
 		"remove only expired session": {
-			data: map[string]Session{
-				"code": {
-					ClientID:  "client-id",
-					CreatedAt: time.Unix(0, 0),
-				},
-				"code2": {
-					ClientID:  "client-id",
-					CreatedAt: now,
-				},
+			secretCache: func() corev1.SecretCache {
+				mock := fake.NewMockCacheInterface[*v1.Secret](ctrl)
+				mock.EXPECT().List(namespace, labels.Set{secretLabel: "true"}.AsSelector()).Return([]*v1.Secret{
+					sessionNonExpiredSecret,
+					sessionExpiredSecret,
+				}, nil)
+
+				return mock
 			},
-			expectedData: map[string]Session{
-				"code2": {
-					ClientID:  "client-id",
-					CreatedAt: now,
-				},
+			secretClient: func() corev1.SecretClient {
+				mock := fake.NewMockClientInterface[*v1.Secret, *v1.SecretList](ctrl)
+				mock.EXPECT().Delete(namespace, sessionExpiredSecret.Name, &metav1.DeleteOptions{}).Return(nil)
+
+				return mock
+			},
+		},
+		"don't remove if there aren't any expired sessions": {
+			secretCache: func() corev1.SecretCache {
+				mock := fake.NewMockCacheInterface[*v1.Secret](ctrl)
+				mock.EXPECT().List(namespace, labels.Set{secretLabel: "true"}.AsSelector()).Return([]*v1.Secret{
+					sessionNonExpiredSecret,
+				}, nil)
+
+				return mock
+			},
+			secretClient: func() corev1.SecretClient {
+				return fake.NewMockClientInterface[*v1.Secret, *v1.SecretList](ctrl)
 			},
 		},
 	}
@@ -168,9 +272,10 @@ func TestCleanUpExpiredSession(t *testing.T) {
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			storage := &MemoryStorage{
-				data:       test.data,
-				expiryTime: time.Hour,
+			storage := &SecretStorage{
+				secretClient: test.secretClient(),
+				secretCache:  test.secretCache(),
+				expiryTime:   time.Hour,
 			}
 			ctx, cancel := context.WithCancel(context.TODO())
 			c := make(chan time.Time)
@@ -185,9 +290,6 @@ func TestCleanUpExpiredSession(t *testing.T) {
 			c <- time.Unix(0, 0)
 			cancel()
 			wg.Wait()
-
-			assert.Equal(t, test.expectedData, storage.data)
 		})
 	}
-
 }

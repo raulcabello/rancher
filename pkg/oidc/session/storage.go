@@ -2,21 +2,37 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	corecontrollers "github.com/rancher/wrangler/v3/pkg/generated/controllers/core/v1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/util/retry"
 	"sync"
 	"time"
 )
 
-type MemoryStorage struct {
-	data       map[string]Session
-	expiryTime time.Duration
-	mu         sync.Mutex
+const (
+	namespace   = "cattle-oidc-codes"
+	secretKey   = "session"
+	secretLabel = "cattle.io/oidc-code"
+)
+
+type SecretStorage struct {
+	secretCache  corecontrollers.SecretCache
+	secretClient corecontrollers.SecretClient
+	expiryTime   time.Duration
+	mu           sync.Mutex
 }
 
-func NewMemoryStorage(ctx context.Context, expiryTime time.Duration) *MemoryStorage {
-	storage := &MemoryStorage{
-		data:       make(map[string]Session),
-		expiryTime: expiryTime,
+func NewSecretStorage(ctx context.Context, secretCache corecontrollers.SecretCache, secretClient corecontrollers.SecretClient, expiryTime time.Duration) *SecretStorage {
+	storage := &SecretStorage{
+		secretCache:  secretCache,
+		secretClient: secretClient,
+		expiryTime:   expiryTime,
 	}
 	t := time.NewTicker(expiryTime)
 	go storage.cleanUpExpiredSessions(ctx, t.C)
@@ -24,42 +40,98 @@ func NewMemoryStorage(ctx context.Context, expiryTime time.Duration) *MemoryStor
 	return storage
 }
 
-func (m *MemoryStorage) AddSession(code string, session Session) error {
+func (m *SecretStorage) AddSession(code string, session Session) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.data[code]; ok {
+	_, err := m.secretCache.Get(namespace, code)
+	if err == nil {
 		return fmt.Errorf("code already exists")
 	}
-	m.data[code] = session
+	if !errors.IsNotFound(err) {
+		return fmt.Errorf("error getting code: %v", err)
+	}
+	sessionBytes, err := json.Marshal(session)
+	if err != nil {
+		return fmt.Errorf("error marshalling session: %v", err)
+	}
+	_, err = m.secretClient.Create(&corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      code,
+			Namespace: namespace,
+			Labels: map[string]string{
+				secretLabel: "true",
+			},
+		},
+		Data: map[string][]byte{
+			secretKey: sessionBytes,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("error creating session: %v", err)
+	}
 
 	return nil
 }
 
-func (m *MemoryStorage) GetAndRemoveSession(code string) (Session, error) {
+func (m *SecretStorage) GetAndRemoveSession(code string) (Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	s, ok := m.data[code]
-	if !ok {
-		return Session{}, fmt.Errorf("invalid code")
+
+	var secret *corev1.Secret
+	// Retry if the secret is not available yet. In most cases (if not all), the secret will be available, even if it was created on a different node.
+	err := wait.ExponentialBackoff(retry.DefaultBackoff, func() (bool, error) {
+		var err error
+		secret, err = m.secretClient.Get(namespace, code, metav1.GetOptions{})
+		if err != nil {
+			if errors.IsNotFound(err) {
+				return false, nil
+			}
+			return false, err
+		}
+		return true, nil
+	})
+	if err != nil {
+		return Session{}, fmt.Errorf("invalid code: %v", err)
 	}
-	delete(m.data, code)
-	if time.Since(s.CreatedAt) > m.expiryTime {
+
+	var session Session
+	err = json.Unmarshal(secret.Data[secretKey], &session)
+	if err != nil {
+		return Session{}, fmt.Errorf("error unmarshalling session: %v", err)
+	}
+	err = m.secretClient.Delete(namespace, code, &metav1.DeleteOptions{})
+	if err != nil {
+		return Session{}, fmt.Errorf("error deleting session: %v", err)
+	}
+	if time.Since(session.CreatedAt) > m.expiryTime {
 		return Session{}, fmt.Errorf("the code has expired")
 	}
 
-	return s, nil
+	return session, nil
 }
 
-func (m *MemoryStorage) cleanUpExpiredSessions(ctx context.Context, c <-chan time.Time) {
+func (m *SecretStorage) cleanUpExpiredSessions(ctx context.Context, c <-chan time.Time) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-c:
 			m.mu.Lock()
-			for code, session := range m.data {
+			secrets, err := m.secretCache.List(namespace, labels.Set{secretLabel: "true"}.AsSelector())
+			if err != nil {
+				return //TODO log error!
+			}
+			for _, secret := range secrets {
+				var session Session
+				err = json.Unmarshal(secret.Data[secretKey], &session)
+				if err != nil {
+					//TODO log error
+				}
 				if time.Since(session.CreatedAt) > m.expiryTime {
-					delete(m.data, code)
+					err := m.secretClient.Delete(namespace, secret.Name, &metav1.DeleteOptions{})
+					if err != nil {
+						// TODO log error
+					}
 				}
 			}
 			m.mu.Unlock()

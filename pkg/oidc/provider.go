@@ -25,7 +25,7 @@ type Provider struct {
 }
 
 func NewProvider(ctx context.Context, tokenCache wrangmgmtv3.TokenCache, tokenClient wrangmgmtv3.TokenClient, userLister wrangmgmtv3.UserCache, userAttributeLister wrangmgmtv3.UserAttributeCache, secretCache corecontrollers.SecretCache, secretClient corecontrollers.SecretClient, oidcClientCache wrangmgmtv3.OIDCClientCache, oidcClientController wrangmgmtv3.OIDCClientController) (Provider, error) {
-	sessionStorage := session.NewMemoryStorage(ctx, 10*time.Minute) //TODO check idle timeout
+	sessionStorage := session.NewSecretStorage(ctx, secretCache, secretClient, 10*time.Minute) //TODO check idle timeout
 	jwks, err := jwks.NewHandler(secretCache, secretClient)
 	if err != nil {
 		return Provider{}, err

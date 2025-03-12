@@ -22,8 +22,6 @@ limitations under the License.
 package v3
 
 import (
-	time "time"
-
 	v1 "github.com/rancher/aks-operator/pkg/apis/aks.cattle.io/v1"
 	ekscattleiov1 "github.com/rancher/eks-operator/pkg/apis/eks.cattle.io/v1"
 	v1alpha1 "github.com/rancher/fleet/pkg/apis/fleet.cattle.io/v1alpha1"
@@ -4981,16 +4979,6 @@ func (in *OIDCClientSpec) DeepCopyInto(out *OIDCClientSpec) {
 		in, out := &in.RedirectURIs, &out.RedirectURIs
 		*out = make([]string, len(*in))
 		copy(*out, *in)
-	}
-	if in.TokenLifeSpan != nil {
-		in, out := &in.TokenLifeSpan, &out.TokenLifeSpan
-		*out = new(time.Duration)
-		**out = **in
-	}
-	if in.RefreshTokenLifeSpan != nil {
-		in, out := &in.RefreshTokenLifeSpan, &out.RefreshTokenLifeSpan
-		*out = new(time.Duration)
-		**out = **in
 	}
 	return
 }

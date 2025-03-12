@@ -42,7 +42,7 @@ type OIDCClientSpec struct {
 	// +optional
 	RedirectURIs []string `json:"redirectURIs"`
 	// +optional
-	TokenLifeSpan *time.Duration `json:"tokenLifeSpan"`
+	TokenLifeSpan time.Duration `json:"tokenLifeSpan"` // TODO add default
 	// +optional
-	RefreshTokenLifeSpan *time.Duration `json:"refreshTokenLifeSpan"`
+	RefreshTokenLifeSpan time.Duration `json:"refreshTokenLifeSpan"`
 }

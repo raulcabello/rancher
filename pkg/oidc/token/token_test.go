@@ -13,7 +13,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/golang-jwt/jwt"
-	extv1 "github.com/rancher/rancher/pkg/apis/ext.cattle.io/v1"
 	v3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/auth/providers"
 	providermocks "github.com/rancher/rancher/pkg/auth/providers/mocks"
@@ -22,7 +21,6 @@ import (
 	"github.com/rancher/rancher/pkg/settings"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/cache"
 	"time"
 
 	"github.com/rancher/rancher/pkg/oidc/session"
@@ -45,6 +43,7 @@ func TestTokenEndpoint(t *testing.T) {
 		tokenCache         *fake.MockNonNamespacedCacheInterface[*v3.Token]
 		tokenClient        *fake.MockNonNamespacedClientInterface[*v3.Token, *v3.TokenList]
 		secretCache        *fake.MockCacheInterface[*v1.Secret]
+		oidcClientCache    *fake.MockNonNamespacedCacheInterface[*v3.OIDCClient]
 		userLister         *fake.MockNonNamespacedCacheInterface[*v3.User]
 		useAttributeLister *fake.MockNonNamespacedCacheInterface[*v3.UserAttribute]
 		storage            *mocks.MockStorage
@@ -64,6 +63,7 @@ func TestTokenEndpoint(t *testing.T) {
 		fakeTokenLifespan        = time.Hour
 		fakeRefreshTokenLifespan = 36 * time.Hour
 	)
+
 	fakeScopes := []interface{}{"openid", "profile"}
 	fakeScopesOfflineAccess := []interface{}{"openid", "profile", "offline_access"}
 	now := time.Now()
@@ -83,24 +83,16 @@ func TestTokenEndpoint(t *testing.T) {
 		Scope:         []string{"openid", "profile", "offline_access"},
 		CodeChallenge: oauth2.S256ChallengeFromVerifier(fakeCodeVerifier),
 	}
-	jsonBytes, _ := json.Marshal(extv1.OIDCClient{
+	fakeOIDCClient := &v3.OIDCClient{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: fakeClientID,
 		},
-		Spec: extv1.OIDCClientSpec{
-			Secret:               fakeClientSecret,
+		Spec: v3.OIDCClientSpec{
 			TokenLifeSpan:        fakeTokenLifespan,
 			RefreshTokenLifeSpan: fakeRefreshTokenLifespan,
 		},
-	})
-	fakeOidcClientSecret := &v1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: fakeClientID,
-		},
-		Data: map[string][]byte{
-			"oidc-client": jsonBytes,
-		},
 	}
+
 	fakeToken := &v3.Token{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: fakeTokenName,
@@ -140,7 +132,11 @@ func TestTokenEndpoint(t *testing.T) {
 	fakeRefreshToken.Header["kid"] = fakeSigningKey
 	privateKey, _ = rsa.GenerateKey(rand.Reader, 2048)
 	fakeRefreshTokenString, _ := fakeRefreshToken.SignedString(privateKey)
-
+	fakeClientk8sSecret := &v1.Secret{
+		Data: map[string][]byte{
+			"client-secret": []byte(fakeClientSecret),
+		},
+	}
 	tests := map[string]struct {
 		req                    func() *http.Request
 		mockSetup              func(mockParams)
@@ -163,7 +159,8 @@ func TestTokenEndpoint(t *testing.T) {
 			},
 			mockSetup: func(m mockParams) {
 				m.storage.EXPECT().GetAndRemoveSession(fakeCode).Return(fakeSession, nil)
-				m.secretCache.EXPECT().Get("cattle-oidc-clients", fakeClientID).Return(fakeOidcClientSecret, nil)
+				m.secretCache.EXPECT().Get("cattle-oidc-clients", fakeClientID).Return(fakeClientk8sSecret, nil)
+				m.oidcClientCache.EXPECT().GetByIndex("oidc.management.cattle.io/oidcclient-by-id", fakeClientID).Return([]*v3.OIDCClient{fakeOIDCClient}, nil)
 				m.tokenCache.EXPECT().Get(fakeTokenName).Return(fakeToken, nil)
 				m.userLister.EXPECT().Get(fakeUserID).Return(fakeUser, nil)
 				m.useAttributeLister.EXPECT().Get(fakeUserID).Return(fakeUserAttributes, nil)
@@ -203,7 +200,8 @@ func TestTokenEndpoint(t *testing.T) {
 			},
 			mockSetup: func(m mockParams) {
 				m.storage.EXPECT().GetAndRemoveSession(fakeCode).Return(fakeSessionOfflineAccess, nil)
-				m.secretCache.EXPECT().Get("cattle-oidc-clients", fakeClientID).Return(fakeOidcClientSecret, nil)
+				m.secretCache.EXPECT().Get("cattle-oidc-clients", fakeClientID).Return(fakeClientk8sSecret, nil)
+				m.oidcClientCache.EXPECT().GetByIndex("oidc.management.cattle.io/oidcclient-by-id", fakeClientID).Return([]*v3.OIDCClient{fakeOIDCClient}, nil)
 				m.tokenCache.EXPECT().Get(fakeTokenName).Return(fakeToken, nil)
 				m.userLister.EXPECT().Get(fakeUserID).Return(fakeUser, nil)
 				m.useAttributeLister.EXPECT().Get(fakeUserID).Return(fakeUserAttributes, nil)
@@ -261,7 +259,7 @@ func TestTokenEndpoint(t *testing.T) {
 				return req
 			},
 			mockSetup: func(m mockParams) {
-				m.secretCache.EXPECT().Get("cattle-oidc-clients", fakeClientID).Return(fakeOidcClientSecret, nil)
+				m.oidcClientCache.EXPECT().GetByIndex("oidc.management.cattle.io/oidcclient-by-id", fakeClientID).Return([]*v3.OIDCClient{fakeOIDCClient}, nil)
 				m.tokenCache.EXPECT().List(labels.SelectorFromSet(map[string]string{
 					tokens.UserIDLabel: fakeUserID,
 				})).Return(fakeTokenList, nil)
@@ -325,13 +323,14 @@ func TestTokenEndpoint(t *testing.T) {
 				secretCache:        fake.NewMockCacheInterface[*v1.Secret](ctrl),
 				userLister:         fake.NewMockNonNamespacedCacheInterface[*v3.User](ctrl),
 				useAttributeLister: fake.NewMockNonNamespacedCacheInterface[*v3.UserAttribute](ctrl),
+				oidcClientCache:    fake.NewMockNonNamespacedCacheInterface[*v3.OIDCClient](ctrl),
 				storage:            mocks.NewMockStorage(ctrl),
 				signingKeyGetter:   mocks.NewMockSigningKeyGetter(ctrl),
 			}
 			if test.mockSetup != nil {
 				test.mockSetup(m)
 			}
-			h := NewHandler(m.tokenCache, m.userLister, m.useAttributeLister, m.storage, m.signingKeyGetter, oidcclients.NewStoreCache(m.secretCache), m.tokenClient)
+			h := NewHandler(m.tokenCache, m.userLister, m.useAttributeLister, m.storage, m.signingKeyGetter, m.oidcClientCache, m.secretCache, m.tokenClient)
 			h.now = fakeTime
 			rec := httptest.NewRecorder()
 
@@ -376,17 +375,4 @@ func TestTokenEndpoint(t *testing.T) {
 			}
 		})
 	}
-}
-
-// TODO
-func newTestUserIndexer(indexed ...*v3.User) cache.Indexer {
-	indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{
-		userSearchIndex: userSearchIndexer,
-	})
-
-	for i := range indexed {
-		indexer.Add(indexed[i])
-	}
-
-	return indexer
 }

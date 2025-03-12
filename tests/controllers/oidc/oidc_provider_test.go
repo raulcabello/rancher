@@ -206,12 +206,21 @@ func (s *OIDCProviderSuite) TestLogin() {
 	})
 	assert.NoError(s.T(), err)
 
+	_, err = s.wranglerContext.Core.Namespace().Create(&v1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "cattle-oidc-codes",
+		},
+	})
+	assert.NoError(s.T(), err)
+
 	err = s.wranglerContext.Mgmt.OIDCClient().Informer().GetIndexer().Add(&v3.OIDCClient{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "oidc-client",
 		},
 		Spec: v3.OIDCClientSpec{
-			RedirectURIs: []string{s.server.URL + "/redirect"},
+			RedirectURIs:         []string{s.server.URL + "/redirect"},
+			TokenLifeSpan:        time.Hour,
+			RefreshTokenLifeSpan: 36 * time.Hour,
 		},
 		Status: v3.OIDCClientStatus{
 			ClientID: clientID,

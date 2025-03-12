@@ -135,31 +135,17 @@ func (h *Handler) createTokenFromCode(r *http.Request) (TokenResponse, error) {
 	if clientID != session.ClientID {
 		return TokenResponse{}, fmt.Errorf("invalid client_id")
 	}
-	oidcClients, err := h.oidcClientCache.GetByIndex("oidc.management.cattle.io/oidcclient-by-id", clientID) //TODO index const?
+	oidcClient, err := h.getOIDCClientByClientID(clientID)
 	if err != nil {
-		return TokenResponse{}, fmt.Errorf("error retreiving OIDC client: %v", err)
+		return TokenResponse{}, err
 	}
-	if len(oidcClients) == 0 {
-		return TokenResponse{}, fmt.Errorf("no OIDC clients found")
-	}
-	oidcClient := oidcClients[0]
-
 	secret, err := h.secretCache.Get("cattle-oidc-clients", clientID)
 	if err != nil {
 		return TokenResponse{}, err
 	}
-	if string(secret.Data["client-secret"]) != clientSecret {
+	if string(secret.Data["client-secret"]) != clientSecret { //TODO change to support multiple secrets
 		return TokenResponse{}, fmt.Errorf("invalid client secret")
 	}
-	/*	clientSecretUnescaped, err := url.QueryUnescape(clientSecret)
-			if err != nil {
-				return TokenResponse{}, fmt.Errorf("can't unescape client secret: %v", err)
-			}
-			//TODO get secret!
-		/*	if oidcClient.Spec.Secret != clientSecretUnescaped {
-				return TokenResponse{}, fmt.Errorf("invalid client secret")
-			}
-	*/
 
 	code_verifier := r.Form.Get("code_verifier")
 	if session.CodeChallenge != oauth2.S256ChallengeFromVerifier(code_verifier) {
@@ -223,7 +209,7 @@ func (h *Handler) refreshToken(r *http.Request) (TokenResponse, error) {
 	if len(claims.Audience) < 1 {
 		return TokenResponse{}, fmt.Errorf("can't find client in audience")
 	}
-	oidcClient, err := h.oidcClientCache.Get(claims.Audience[0])
+	oidcClient, err := h.getOIDCClientByClientID(claims.Audience[0])
 	if err != nil {
 		return TokenResponse{}, fmt.Errorf("error retreiving OIDC client from audience: %v", err)
 	}
@@ -272,18 +258,9 @@ func (h *Handler) createResponse(rancherToken *v3.Token, oidcClient *v3.OIDCClie
 		return TokenResponse{}, err
 	}
 
-	tokenLifeSpan := defaultTokenLifeSpan
-	if oidcClient.Spec.TokenLifeSpan != nil {
-		tokenLifeSpan = *oidcClient.Spec.TokenLifeSpan
-	}
-	refreshTokenLifeSpan := defaultRefreshTokenLifeSpan
-	if oidcClient.Spec.RefreshTokenLifeSpan != nil {
-		refreshTokenLifeSpan = *oidcClient.Spec.RefreshTokenLifeSpan
-	}
-
 	idClaims := jwt.MapClaims{
 		"aud": []string{oidcClient.Name},
-		"exp": h.now().Add(tokenLifeSpan).Unix(),
+		"exp": h.now().Add(oidcClient.Spec.TokenLifeSpan).Unix(),
 		"iss": settings.ServerURL.Get() + "/oidc",
 		"iat": h.now().Unix(),
 		"sub": rancherToken.UserID,
@@ -309,7 +286,7 @@ func (h *Handler) createResponse(rancherToken *v3.Token, oidcClient *v3.OIDCClie
 
 	accessClaims := jwt.MapClaims{
 		"aud":   []string{oidcClient.Name},
-		"exp":   h.now().Add(tokenLifeSpan).Unix(),
+		"exp":   h.now().Add(oidcClient.Spec.TokenLifeSpan).Unix(),
 		"iss":   settings.ServerURL.Get() + "/oidc", //TODO
 		"iat":   h.now().Unix(),
 		"sub":   rancherToken.UserID,
@@ -336,7 +313,7 @@ func (h *Handler) createResponse(rancherToken *v3.Token, oidcClient *v3.OIDCClie
 		refreshTokenID := oidcClient.Name + "-" + rancherToken.UserID
 		refreshClaims := jwt.MapClaims{
 			"aud":                []string{oidcClient.Name},
-			"exp":                h.now().Add(refreshTokenLifeSpan).Unix(),
+			"exp":                h.now().Add(oidcClient.Spec.RefreshTokenLifeSpan).Unix(),
 			"iat":                h.now().Unix(),
 			"sub":                rancherToken.UserID,
 			"rancher_token_hash": rancherTokenHash,
@@ -359,7 +336,7 @@ func (h *Handler) createResponse(rancherToken *v3.Token, oidcClient *v3.OIDCClie
 		}
 	}
 
-	resp.ExpiresIn = int(tokenLifeSpan.Seconds())
+	resp.ExpiresIn = int(oidcClient.Spec.TokenLifeSpan.Seconds())
 
 	return resp, nil
 }
@@ -380,4 +357,16 @@ func (h *Handler) addOIDCClientIDToRancherToken(oidcClientName string, rancherTo
 	_, err = h.tokenClient.Patch(rancherTokenName, types.JSONPatchType, patch)
 
 	return err
+}
+
+func (h *Handler) getOIDCClientByClientID(clientID string) (*v3.OIDCClient, error) {
+	oidcClients, err := h.oidcClientCache.GetByIndex("oidc.management.cattle.io/oidcclient-by-id", clientID) //TODO index const?
+	if err != nil {
+		return nil, fmt.Errorf("error retreiving OIDC client: %v", err)
+	}
+	if len(oidcClients) == 0 {
+		return nil, fmt.Errorf("no OIDC clients found")
+	}
+	return oidcClients[0], nil
+
 }
