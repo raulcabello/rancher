@@ -9,7 +9,7 @@ const (
 	characters         = "bcdfghjklmnpqrstvwxz2456789"
 	clientIDLength     = 10
 	codeLength         = 56
-	clientSecretLength = 32
+	clientSecretLength = 56
 	clientIDPrefix     = "client-"
 	codePrefix         = "code-"
 	clientSecretPrefix = "secret-"

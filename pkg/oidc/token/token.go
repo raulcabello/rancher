@@ -143,7 +143,14 @@ func (h *Handler) createTokenFromCode(r *http.Request) (TokenResponse, error) {
 	if err != nil {
 		return TokenResponse{}, err
 	}
-	if string(secret.Data["client-secret"]) != clientSecret { //TODO change to support multiple secrets
+	clientSecretFound := false
+	for _, cs := range secret.Data {
+		if clientSecret == string(cs) {
+			clientSecretFound = true
+			break
+		}
+	}
+	if !clientSecretFound {
 		return TokenResponse{}, fmt.Errorf("invalid client secret")
 	}
 
