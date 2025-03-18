@@ -27,9 +27,9 @@ const (
 
 type oidcClientController struct {
 	secretClient    corev1.SecretClient
+	secretCache     corev1.SecretCache
 	oidcClient      wrangmgmtv3.OIDCClientClient
 	oidcClientCache wrangmgmtv3.OIDCClientCache
-	secretCache     corev1.SecretCache
 }
 
 func Register(ctx context.Context, wContext *wrangler.Context) {
