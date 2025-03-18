@@ -15,23 +15,23 @@ const (
 	clientSecretPrefix = "secret-"
 )
 
-type RandomStringCreator struct{}
+type RandomStringGenerator struct{}
 
 var charsLength = big.NewInt(int64(len(characters)))
 
-func (r *RandomStringCreator) GenerateClientID() (string, error) {
+func (r *RandomStringGenerator) GenerateClientID() (string, error) {
 	return r.generateRandomString(clientIDPrefix, clientIDLength)
 }
 
-func (r *RandomStringCreator) GenerateClientSecret() (string, error) {
+func (r *RandomStringGenerator) GenerateClientSecret() (string, error) {
 	return r.generateRandomString(clientSecretPrefix, clientSecretLength)
 }
 
-func (r *RandomStringCreator) GenerateCode() (string, error) {
+func (r *RandomStringGenerator) GenerateCode() (string, error) {
 	return r.generateRandomString(codePrefix, codeLength)
 }
 
-func (r *RandomStringCreator) generateRandomString(prefix string, length int) (string, error) {
+func (r *RandomStringGenerator) generateRandomString(prefix string, length int) (string, error) {
 	token := make([]byte, length)
 	for i := range token {
 		r, err := rand.Int(rand.Reader, charsLength)

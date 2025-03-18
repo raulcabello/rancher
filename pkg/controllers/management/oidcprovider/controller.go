@@ -23,13 +23,20 @@ const (
 	removeClientSecretAnn     = "cattle.io/oidc-client-secret-remove"
 	regenerateClientSecretAnn = "cattle.io/oidc-client-secret-regenerate"
 	secretKeyPrefix           = "client-secret-"
+	secretNamespace           = "cattle-oidc-client-secrets"
 )
+
+type ClientIDAndSecretGenerator interface {
+	GenerateClientID() (string, error)
+	GenerateClientSecret() (string, error)
+}
 
 type oidcClientController struct {
 	secretClient    corev1.SecretClient
 	secretCache     corev1.SecretCache
 	oidcClient      wrangmgmtv3.OIDCClientClient
 	oidcClientCache wrangmgmtv3.OIDCClientCache
+	generator       ClientIDAndSecretGenerator
 }
 
 func Register(ctx context.Context, wContext *wrangler.Context) {
@@ -39,6 +46,7 @@ func Register(ctx context.Context, wContext *wrangler.Context) {
 		secretCache:     wContext.Core.Secret().Cache(),
 		oidcClient:      wContext.Mgmt.OIDCClient(),
 		oidcClientCache: wContext.Mgmt.OIDCClient().Cache(),
+		generator:       &session.RandomStringGenerator{},
 	}
 	oidcClient.OnChange(ctx, "oidc-client-change", controller.onChange)
 }
@@ -48,12 +56,10 @@ func (c *oidcClientController) onChange(_ string, oidcClient *v3.OIDCClient) (*v
 		return nil, nil
 	}
 
-	screator := &session.RandomStringCreator{}
-
 	if oidcClient.Status.ClientID == "" {
-		clientID, err := screator.GenerateClientID()
+		clientID, err := c.generator.GenerateClientID()
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to generate clientID: %v", err)
 		}
 
 		clients, err := c.oidcClientCache.List(labels.Everything())
@@ -79,12 +85,12 @@ func (c *oidcClientController) onChange(_ string, oidcClient *v3.OIDCClient) (*v
 		}
 	}
 
-	_, err := c.secretCache.Get("cattle-oidc-clients", oidcClient.Name) //TODO create ns!
+	k8sSecret, err := c.secretCache.Get(secretNamespace, oidcClient.Name)
 	if err != nil && !errors.IsNotFound(err) {
 		return nil, err
 	}
 	if errors.IsNotFound(err) {
-		clientSecret, err := screator.GenerateClientSecret()
+		clientSecret, err := c.generator.GenerateClientSecret()
 		if err != nil {
 			return nil, err
 		}
@@ -92,7 +98,7 @@ func (c *oidcClientController) onChange(_ string, oidcClient *v3.OIDCClient) (*v
 		_, err = c.secretClient.Create(&v1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      oidcClient.Name,
-				Namespace: "cattle-oidc-clients",
+				Namespace: secretNamespace,
 			},
 			StringData: map[string]string{
 				secretKeyPrefix + "1": clientSecret,
@@ -104,16 +110,12 @@ func (c *oidcClientController) onChange(_ string, oidcClient *v3.OIDCClient) (*v
 	}
 
 	if _, ok := oidcClient.Annotations[createClientSecretAnn]; ok {
-		clientSecret, err := screator.GenerateClientSecret()
-		if err != nil {
-			return nil, err
-		}
-		s, err := c.secretCache.Get("cattle-oidc-clients", oidcClient.Name)
+		clientSecret, err := c.generator.GenerateClientSecret()
 		if err != nil {
 			return nil, err
 		}
 		maxSecretKeyCounter := 1
-		for key, _ := range s.Data {
+		for key, _ := range k8sSecret.Data {
 			split := strings.Split(key, "-")
 			if len(split) != 3 {
 				return nil, fmt.Errorf("invalid key found in secret")
@@ -126,8 +128,8 @@ func (c *oidcClientController) onChange(_ string, oidcClient *v3.OIDCClient) (*v
 				maxSecretKeyCounter = num
 			}
 		}
-		s.Data[secretKeyPrefix+strconv.Itoa(maxSecretKeyCounter+1)] = []byte(clientSecret)
-		_, err = c.secretClient.Update(s)
+		k8sSecret.Data[secretKeyPrefix+strconv.Itoa(maxSecretKeyCounter+1)] = []byte(clientSecret)
+		_, err = c.secretClient.Update(k8sSecret)
 		if err != nil {
 			return nil, err
 		}
@@ -139,21 +141,17 @@ func (c *oidcClientController) onChange(_ string, oidcClient *v3.OIDCClient) (*v
 	}
 
 	if clientSecretIDs, ok := oidcClient.Annotations[regenerateClientSecretAnn]; ok {
-		s, err := c.secretCache.Get("cattle-oidc-clients", oidcClient.Name)
-		if err != nil {
-			return nil, err
-		}
 		csids := strings.Split(clientSecretIDs, ",")
 		for _, csid := range csids {
-			if _, ok := s.Data[csid]; ok {
-				clientSecret, err := screator.GenerateClientSecret()
+			if _, ok := k8sSecret.Data[csid]; ok {
+				clientSecret, err := c.generator.GenerateClientSecret()
 				if err != nil {
 					return nil, err
 				}
-				s.Data[csid] = []byte(clientSecret)
+				k8sSecret.Data[csid] = []byte(clientSecret)
 			}
 		}
-		_, err = c.secretClient.Update(s)
+		_, err = c.secretClient.Update(k8sSecret)
 		if err != nil {
 			return nil, err
 		}
@@ -166,15 +164,11 @@ func (c *oidcClientController) onChange(_ string, oidcClient *v3.OIDCClient) (*v
 	}
 
 	if clientSecretIDs, ok := oidcClient.Annotations[removeClientSecretAnn]; ok {
-		s, err := c.secretCache.Get("cattle-oidc-clients", oidcClient.Name)
-		if err != nil {
-			return nil, err
-		}
 		csids := strings.Split(clientSecretIDs, ",")
 		for _, csid := range csids {
-			delete(s.Data, csid)
+			delete(k8sSecret.Data, csid)
 		}
-		_, err = c.secretClient.Update(s)
+		_, err = c.secretClient.Update(k8sSecret)
 		if err != nil {
 			return nil, err
 		}

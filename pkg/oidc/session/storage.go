@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	namespace   = "cattle-oidc-codes"
+	namespace   = "cattle-oidc-codes" //TODO remove
 	secretKey   = "session"
 	secretLabel = "cattle.io/oidc-code"
 )

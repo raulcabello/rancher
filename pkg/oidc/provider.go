@@ -11,12 +11,19 @@ import (
 	"github.com/rancher/rancher/pkg/oidc/token"
 	"github.com/rancher/rancher/pkg/settings"
 	corecontrollers "github.com/rancher/wrangler/v3/pkg/generated/controllers/core/v1"
+	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/cache"
 	"net/http"
 	"time"
 )
 
-const oidcClientByIDIndex = "oidc.management.cattle.io/oidcclient-by-id"
+const (
+	oidcClientByIDIndex = "oidc.management.cattle.io/oidcclient-by-id"
+	secretsNamespace    = "cattle-oidc-client-secrets"
+	codesNamespace      = "cattle-oidc-codes"
+)
 
 type Provider struct {
 	jwksHandler  *jwks.Handler
@@ -24,7 +31,7 @@ type Provider struct {
 	tokenHandler *token.Handler
 }
 
-func NewProvider(ctx context.Context, tokenCache wrangmgmtv3.TokenCache, tokenClient wrangmgmtv3.TokenClient, userLister wrangmgmtv3.UserCache, userAttributeLister wrangmgmtv3.UserAttributeCache, secretCache corecontrollers.SecretCache, secretClient corecontrollers.SecretClient, oidcClientCache wrangmgmtv3.OIDCClientCache, oidcClientController wrangmgmtv3.OIDCClientController) (Provider, error) {
+func NewProvider(ctx context.Context, tokenCache wrangmgmtv3.TokenCache, tokenClient wrangmgmtv3.TokenClient, userLister wrangmgmtv3.UserCache, userAttributeLister wrangmgmtv3.UserAttributeCache, secretCache corecontrollers.SecretCache, secretClient corecontrollers.SecretClient, oidcClientCache wrangmgmtv3.OIDCClientCache, oidcClientController wrangmgmtv3.OIDCClientController, namespaceClient corecontrollers.NamespaceClient) (Provider, error) {
 	sessionStorage := session.NewSecretStorage(ctx, secretCache, secretClient, 10*time.Minute) //TODO check idle timeout
 	jwks, err := jwks.NewHandler(secretCache, secretClient)
 	if err != nil {
@@ -45,10 +52,25 @@ func NewProvider(ctx context.Context, tokenCache wrangmgmtv3.TokenCache, tokenCl
 	if err != nil {
 		return Provider{}, err
 	}
+	// create necessary namespaces
+	if _, err := namespaceClient.Create(&v1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: secretsNamespace,
+		},
+	}); err != nil && !apierrors.IsAlreadyExists(err) {
+		return Provider{}, err
+	}
+	if _, err := namespaceClient.Create(&v1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: codesNamespace,
+		},
+	}); err != nil && !apierrors.IsAlreadyExists(err) {
+		return Provider{}, err
+	}
 
 	return Provider{
 		jwksHandler:  jwks,
-		authHandler:  auth.NewHandler(tokenCache, userLister, sessionStorage, &session.RandomStringCreator{}, oidcClientCache),
+		authHandler:  auth.NewHandler(tokenCache, userLister, sessionStorage, &session.RandomStringGenerator{}, oidcClientCache),
 		tokenHandler: token.NewHandler(tokenCache, userLister, userAttributeLister, sessionStorage, jwks, oidcClientCache, secretCache, tokenClient),
 	}, nil
 }

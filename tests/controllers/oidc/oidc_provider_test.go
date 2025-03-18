@@ -150,7 +150,7 @@ func (s *OIDCProviderSuite) SetupSuite() {
 	mux := gmux.NewRouter()
 	mux.UseEncodedPath()
 
-	p, err := oidc.NewProvider(context.TODO(), s.wranglerContext.Mgmt.Token().Cache(), s.wranglerContext.Mgmt.Token(), s.wranglerContext.Mgmt.User().Cache(), s.wranglerContext.Mgmt.UserAttribute().Cache(), s.wranglerContext.Core.Secret().Cache(), s.wranglerContext.Core.Secret(), s.wranglerContext.Mgmt.OIDCClient().Cache(), s.wranglerContext.Mgmt.OIDCClient())
+	p, err := oidc.NewProvider(context.TODO(), s.wranglerContext.Mgmt.Token().Cache(), s.wranglerContext.Mgmt.Token(), s.wranglerContext.Mgmt.User().Cache(), s.wranglerContext.Mgmt.UserAttribute().Cache(), s.wranglerContext.Core.Secret().Cache(), s.wranglerContext.Core.Secret(), s.wranglerContext.Mgmt.OIDCClient().Cache(), s.wranglerContext.Mgmt.OIDCClient(), s.wranglerContext.Core.Namespace())
 	assert.NoError(s.T(), err)
 
 	p.RegisterOIDCProviderHandles(mux)
@@ -199,20 +199,6 @@ func (s *OIDCProviderSuite) TestLogin() {
 	})
 	assert.NoError(s.T(), err)
 
-	_, err = s.wranglerContext.Core.Namespace().Create(&v1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "cattle-oidc-clients",
-		},
-	})
-	assert.NoError(s.T(), err)
-
-	_, err = s.wranglerContext.Core.Namespace().Create(&v1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "cattle-oidc-codes",
-		},
-	})
-	assert.NoError(s.T(), err)
-
 	err = s.wranglerContext.Mgmt.OIDCClient().Informer().GetIndexer().Add(&v3.OIDCClient{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "oidc-client",
@@ -230,7 +216,7 @@ func (s *OIDCProviderSuite) TestLogin() {
 	_, err = s.wranglerContext.Core.Secret().Create(&v1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      clientID,
-			Namespace: "cattle-oidc-clients",
+			Namespace: "cattle-oidc-client-secrets",
 		},
 		Data: map[string][]byte{ //TODO check!
 			"client-secret": []byte(clientSecret),

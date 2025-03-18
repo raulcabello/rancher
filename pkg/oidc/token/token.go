@@ -139,7 +139,7 @@ func (h *Handler) createTokenFromCode(r *http.Request) (TokenResponse, error) {
 	if err != nil {
 		return TokenResponse{}, err
 	}
-	secret, err := h.secretCache.Get("cattle-oidc-clients", clientID)
+	secret, err := h.secretCache.Get("cattle-oidc-client-secrets", clientID) //TODO
 	if err != nil {
 		return TokenResponse{}, err
 	}

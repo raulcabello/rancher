@@ -159,7 +159,7 @@ func TestTokenEndpoint(t *testing.T) {
 			},
 			mockSetup: func(m mockParams) {
 				m.storage.EXPECT().GetAndRemoveSession(fakeCode).Return(fakeSession, nil)
-				m.secretCache.EXPECT().Get("cattle-oidc-clients", fakeClientID).Return(fakeClientk8sSecret, nil)
+				m.secretCache.EXPECT().Get("cattle-oidc-client-secrets", fakeClientID).Return(fakeClientk8sSecret, nil)
 				m.oidcClientCache.EXPECT().GetByIndex("oidc.management.cattle.io/oidcclient-by-id", fakeClientID).Return([]*v3.OIDCClient{fakeOIDCClient}, nil)
 				m.tokenCache.EXPECT().Get(fakeTokenName).Return(fakeToken, nil)
 				m.userLister.EXPECT().Get(fakeUserID).Return(fakeUser, nil)
@@ -200,7 +200,7 @@ func TestTokenEndpoint(t *testing.T) {
 			},
 			mockSetup: func(m mockParams) {
 				m.storage.EXPECT().GetAndRemoveSession(fakeCode).Return(fakeSessionOfflineAccess, nil)
-				m.secretCache.EXPECT().Get("cattle-oidc-clients", fakeClientID).Return(fakeClientk8sSecret, nil)
+				m.secretCache.EXPECT().Get("cattle-oidc-client-secrets", fakeClientID).Return(fakeClientk8sSecret, nil)
 				m.oidcClientCache.EXPECT().GetByIndex("oidc.management.cattle.io/oidcclient-by-id", fakeClientID).Return([]*v3.OIDCClient{fakeOIDCClient}, nil)
 				m.tokenCache.EXPECT().Get(fakeTokenName).Return(fakeToken, nil)
 				m.userLister.EXPECT().Get(fakeUserID).Return(fakeUser, nil)
