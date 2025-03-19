@@ -1,4 +1,4 @@
-package jwks
+package oidc
 
 import (
 	"crypto/rand"
@@ -24,31 +24,54 @@ const (
 	keySecretName      = "oidc-signing-key"
 )
 
-type Handler struct {
+// JWK represents a JSON Web Key
+type JWK struct {
+	Kty string `json:"kty"` // Key Type (e.g., RSA)
+	Use string `json:"use"` // Key Usage (e.g., sig)
+	Kid string `json:"kid"` // Key ID
+	N   string `json:"n"`   // Modulus
+	E   string `json:"e"`   // Exponent
+}
+
+// JWKS represents a JSON Web Key Set
+type JWKS struct {
+	Keys []JWK `json:"keys"`
+}
+
+type jwksHandler struct {
 	secretCache  corecontrollers.SecretCache
 	secretClient corecontrollers.SecretClient
 }
 
-func NewHandler(secretCache corecontrollers.SecretCache, secretClient corecontrollers.SecretClient) (*Handler, error) {
-	_, err := secretClient.Get(keySecretNamespace, keySecretName, metav1.GetOptions{})
+// newJWKSHandler returns a jwks handler. Creates a default signing key.
+func newJWKSHandler(secretCache corecontrollers.SecretCache, secretClient corecontrollers.SecretClient) (*jwksHandler, error) {
+	_, err := secretCache.Get(keySecretNamespace, keySecretName)
 	if err != nil && !errors.IsNotFound(err) {
 		return nil, err
 	}
 
 	if errors.IsNotFound(err) {
-		// generate default key
+		// generate a default RSA private key
 		privateKey, err := rsa.GenerateKey(rand.Reader, keyBits)
 		if err != nil {
 			return nil, err
 		}
-		privateKeyDER := x509.MarshalPKCS1PrivateKey(privateKey)
-		privateKeyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: privateKeyDER})
 
+		// Encode private key to PEM
+		privateKeyPEM := pem.EncodeToMemory(&pem.Block{
+			Type:  "RSA PRIVATE KEY",
+			Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
+		})
+
+		// Encode public key to PEM
 		publicKeyDER, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to marshal public key: %w", err)
 		}
-		publicKeyPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: publicKeyDER})
+		publicKeyPEM := pem.EncodeToMemory(&pem.Block{
+			Type:  "PUBLIC KEY",
+			Bytes: publicKeyDER,
+		})
 
 		secret := &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
@@ -67,47 +90,48 @@ func NewHandler(secretCache corecontrollers.SecretCache, secretClient corecontro
 		}
 	}
 
-	return &Handler{
+	return &jwksHandler{
 		secretCache:  secretCache,
 		secretClient: secretClient,
 	}, nil
 }
 
-func (h *Handler) JWKSEndpoint(w http.ResponseWriter, r *http.Request) {
+// jwksEndpoint writes the content of the jwks endpoint
+func (h *jwksHandler) jwksEndpoint(w http.ResponseWriter, r *http.Request) {
 	s, err := h.secretCache.Get(keySecretNamespace, keySecretName)
 	if err != nil {
-		http.Error(w, "failed to get secret with public keys", http.StatusInternalServerError)
+		writeError("failed to get secret with public keys", w, http.StatusInternalServerError)
 		return
 	}
-	keys := []JWK{}
+	var keys []JWK
 	for name, value := range s.Data {
-		if strings.HasSuffix(name, ".pub") {
-			pubKey, err := getPublicKeyFromSecretData(value)
-			if err != nil {
-				http.Error(w, "failed to get public keys", http.StatusInternalServerError)
-				return
-			}
-			n := base64.RawURLEncoding.EncodeToString(pubKey.N.Bytes())
-			e := base64.RawURLEncoding.EncodeToString(big.NewInt(int64(pubKey.E)).Bytes())
-			keys = append(keys, JWK{
-				Kty: "RSA",
-				Use: "sig",
-				Kid: strings.TrimSuffix(name, ".pub"),
-				N:   n,
-				E:   e,
-			})
+		if !strings.HasSuffix(name, ".pub") {
+			continue
 		}
+
+		pubKey, err := getPublicKeyFromSecretData(value)
+		if err != nil {
+			http.Error(w, "failed to extract public key from secret data", http.StatusInternalServerError)
+			return
+		}
+
+		keys = append(keys, JWK{
+			Kty: "RSA",
+			Use: "sig",
+			Kid: strings.TrimSuffix(name, ".pub"),
+			N:   base64.RawURLEncoding.EncodeToString(pubKey.N.Bytes()),
+			E:   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(pubKey.E)).Bytes()),
+		})
 	}
-	jwks := JWKS{
-		Keys: keys,
-	}
+
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(jwks); err != nil {
-		http.Error(w, "failed to encode JWKS", http.StatusInternalServerError)
+	if err := json.NewEncoder(w).Encode(JWKS{Keys: keys}); err != nil {
+		writeError("failed to encode JWKS", w, http.StatusInternalServerError)
 	}
 }
 
-func (h *Handler) GetSigningKey() (*rsa.PrivateKey, string, error) {
+// GetSigningKey returns the key used for signing jwt tokens
+func (h *jwksHandler) GetSigningKey() (*rsa.PrivateKey, string, error) {
 	s, err := h.secretCache.Get(keySecretNamespace, keySecretName)
 	if err != nil {
 		return nil, "", err
@@ -120,7 +144,8 @@ func (h *Handler) GetSigningKey() (*rsa.PrivateKey, string, error) {
 	return nil, "", fmt.Errorf("signing key not found")
 }
 
-func (h *Handler) GetPublicKey(kid string) (*rsa.PublicKey, error) {
+// GetPublicKey returns the public key specified by the kid
+func (h *jwksHandler) GetPublicKey(kid string) (*rsa.PublicKey, error) {
 	s, err := h.secretCache.Get(keySecretNamespace, keySecretName)
 	if err != nil {
 		return nil, err
@@ -159,18 +184,4 @@ func getPublicKeyFromSecretData(publicKeyPEM []byte) (*rsa.PublicKey, error) {
 		return nil, fmt.Errorf("not an RSA public key")
 	}
 	return publicKey, nil
-}
-
-// JWK represents a JSON Web Key
-type JWK struct {
-	Kty string `json:"kty"` // Key Type (e.g., RSA)
-	Use string `json:"use"` // Key Usage (e.g., sig)
-	Kid string `json:"kid"` // Key ID
-	N   string `json:"n"`   // Modulus
-	E   string `json:"e"`   // Exponent
-}
-
-// JWKS represents a JSON Web Key Set
-type JWKS struct {
-	Keys []JWK `json:"keys"`
 }

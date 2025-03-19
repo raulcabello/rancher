@@ -1,4 +1,4 @@
-package randstr
+package randomstring
 
 import (
 	"github.com/stretchr/testify/assert"
