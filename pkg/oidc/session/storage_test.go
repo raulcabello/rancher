@@ -2,6 +2,10 @@ package session
 
 import (
 	"encoding/json"
+	"sync"
+	"testing"
+	"time"
+
 	corev1 "github.com/rancher/wrangler/v3/pkg/generated/controllers/core/v1"
 	"github.com/rancher/wrangler/v3/pkg/generic/fake"
 	"github.com/stretchr/testify/assert"
@@ -12,9 +16,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"sync"
-	"testing"
-	"time"
 )
 
 func TestAddSession(t *testing.T) {

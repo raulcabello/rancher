@@ -2,16 +2,17 @@ package auth
 
 import (
 	"fmt"
+	"net/http"
+	"slices"
+	"strings"
+	"time"
+
 	v3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/auth/providers"
 	"github.com/rancher/rancher/pkg/auth/tokens"
 	wrangmgmtv3 "github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/oidc/session"
 	"github.com/rancher/rancher/pkg/settings"
-	"net/http"
-	"slices"
-	"strings"
-	"time"
 )
 
 const (

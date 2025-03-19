@@ -12,6 +12,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"time"
+
 	"github.com/golang-jwt/jwt"
 	v3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/auth/providers"
@@ -21,7 +23,11 @@ import (
 	"github.com/rancher/rancher/pkg/settings"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
-	"time"
+
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"testing"
 
 	"github.com/rancher/rancher/pkg/oidc/session"
 	"github.com/rancher/wrangler/v3/pkg/generic/fake"
@@ -31,10 +37,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
-	"net/http"
-	"net/http/httptest"
-	"net/url"
-	"testing"
 )
 
 func TestTokenEndpoint(t *testing.T) {

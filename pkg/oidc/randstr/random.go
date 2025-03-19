@@ -1,4 +1,4 @@
-package session
+package randstr
 
 import (
 	"crypto/rand"
@@ -15,23 +15,26 @@ const (
 	clientSecretPrefix = "secret-"
 )
 
-type RandomStringGenerator struct{}
+type Generator struct{}
 
 var charsLength = big.NewInt(int64(len(characters)))
 
-func (r *RandomStringGenerator) GenerateClientID() (string, error) {
+// GenerateClientID generates an OIDC Client ID. It has 'client-' as a prefix and 10 random characters.
+func (r *Generator) GenerateClientID() (string, error) {
 	return r.generateRandomString(clientIDPrefix, clientIDLength)
 }
 
-func (r *RandomStringGenerator) GenerateClientSecret() (string, error) {
+// GenerateClientSecret generates an OIDC Client Secret. It has 'secret-' as a prefix and 56 random characters.
+func (r *Generator) GenerateClientSecret() (string, error) {
 	return r.generateRandomString(clientSecretPrefix, clientSecretLength)
 }
 
-func (r *RandomStringGenerator) GenerateCode() (string, error) {
+// GenerateCode generates an OIDC Code. It has 'code-' as a prefix and 56 random characters.
+func (r *Generator) GenerateCode() (string, error) {
 	return r.generateRandomString(codePrefix, codeLength)
 }
 
-func (r *RandomStringGenerator) generateRandomString(prefix string, length int) (string, error) {
+func (r *Generator) generateRandomString(prefix string, length int) (string, error) {
 	token := make([]byte, length)
 	for i := range token {
 		r, err := rand.Int(rand.Reader, charsLength)
