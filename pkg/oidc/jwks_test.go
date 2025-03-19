@@ -159,7 +159,7 @@ func TestGetSigningKey(t *testing.T) {
 			t.Parallel()
 			h := jwksHandler{secretCache: test.secretCache()}
 
-			key, kid, err := h.GetSigningKey()
+			key, kid, err := h.getSigningKey()
 
 			if test.expectedErr != "" {
 				assert.EqualError(t, err, test.expectedErr)
@@ -227,7 +227,7 @@ func TestGetPublicKey(t *testing.T) {
 			t.Parallel()
 			h := jwksHandler{secretCache: test.secretCache()}
 
-			key, err := h.GetPublicKey(test.kid)
+			key, err := h.getPublicKey(test.kid)
 
 			if test.expectedErr != "" {
 				assert.EqualError(t, err, test.expectedErr)

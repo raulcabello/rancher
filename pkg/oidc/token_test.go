@@ -1,7 +1,7 @@
 //go:generate mockgen -source=../../auth/providers/common/provider.go -destination=../../auth/providers/mocks/provider.go -package=mocks
 //go:generate mockgen -source=./token.go -destination=../mocks/token.go -package=mocks
 
-package token
+package oidc
 
 import (
 	"bytes"
@@ -332,7 +332,7 @@ func TestTokenEndpoint(t *testing.T) {
 			if test.mockSetup != nil {
 				test.mockSetup(m)
 			}
-			h := NewHandler(m.tokenCache, m.userLister, m.useAttributeLister, m.storage, m.signingKeyGetter, m.oidcClientCache, m.secretCache, m.tokenClient)
+			h := newTokenHandler(m.tokenCache, m.userLister, m.useAttributeLister, m.storage, m.signingKeyGetter, m.oidcClientCache, m.secretCache, m.tokenClient)
 			h.now = fakeTime
 			rec := httptest.NewRecorder()
 

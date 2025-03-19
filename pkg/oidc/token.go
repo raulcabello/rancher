@@ -1,4 +1,4 @@
-package token
+package oidc
 
 import (
 	"crypto/rsa"
@@ -26,22 +26,21 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-var (
-	defaultTokenLifeSpan        = 1 * time.Hour
-	defaultRefreshTokenLifeSpan = 36 * time.Hour
-)
-
-type SigningKeyGetter interface {
-	GetSigningKey() (*rsa.PrivateKey, string, error)
-	GetPublicKey(kid string) (*rsa.PublicKey, error)
+type SessionGetter interface {
+	GetAndRemove(code string) (session.Session, error)
 }
 
-type Handler struct {
+type SigningKeyGetter interface {
+	getSigningKey() (*rsa.PrivateKey, string, error)
+	getPublicKey(kid string) (*rsa.PublicKey, error)
+}
+
+type tokenHandler struct {
 	tokenCache          wrangmgmtv3.TokenCache
 	tokenClient         wrangmgmtv3.TokenClient
 	userLister          wrangmgmtv3.UserCache
 	userAttributeLister wrangmgmtv3.UserAttributeCache
-	sessionStorage      session.Storage
+	sessionGetter       SessionGetter
 	oidcClientCache     wrangmgmtv3.OIDCClientCache
 	secretCache         corev1.SecretCache
 	oidcClientIndexer   cache.Indexer
@@ -62,21 +61,21 @@ type RefreshTokenClaims struct {
 	Scope            []string `json:"scope"`
 }
 
-func NewHandler(tokenCache wrangmgmtv3.TokenCache,
+func newTokenHandler(tokenCache wrangmgmtv3.TokenCache,
 	userLister wrangmgmtv3.UserCache,
 	userAttributeLister wrangmgmtv3.UserAttributeCache,
-	sessionStorage session.Storage,
+	sessionGetter SessionGetter,
 	jwks SigningKeyGetter,
 	oidcClientCache wrangmgmtv3.OIDCClientCache,
 	secretCache corev1.SecretCache,
-	tokenClient wrangmgmtv3.TokenClient) *Handler {
+	tokenClient wrangmgmtv3.TokenClient) *tokenHandler {
 
-	return &Handler{
+	return &tokenHandler{
 		tokenCache:          tokenCache,
 		tokenClient:         tokenClient,
 		userLister:          userLister,
 		userAttributeLister: userAttributeLister,
-		sessionStorage:      sessionStorage,
+		sessionGetter:       sessionGetter,
 		jwks:                jwks,
 		oidcClientCache:     oidcClientCache,
 		secretCache:         secretCache,
@@ -84,7 +83,7 @@ func NewHandler(tokenCache wrangmgmtv3.TokenCache,
 	}
 }
 
-func (h *Handler) TokenEndpoint(w http.ResponseWriter, r *http.Request) {
+func (h *tokenHandler) TokenEndpoint(w http.ResponseWriter, r *http.Request) {
 	err := r.ParseForm()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -122,8 +121,8 @@ func (h *Handler) TokenEndpoint(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *Handler) createTokenFromCode(r *http.Request) (TokenResponse, error) {
-	session, err := h.sessionStorage.GetAndRemoveSession(r.FormValue("code"))
+func (h *tokenHandler) createTokenFromCode(r *http.Request) (TokenResponse, error) {
+	session, err := h.sessionGetter.GetAndRemove(r.FormValue("code"))
 	if err != nil {
 		return TokenResponse{}, err
 	}
@@ -168,7 +167,7 @@ func (h *Handler) createTokenFromCode(r *http.Request) (TokenResponse, error) {
 	return h.createResponse(rancherToken, oidcClient, session.Nonce, session.Scope)
 }
 
-func (h *Handler) refreshToken(r *http.Request) (TokenResponse, error) {
+func (h *tokenHandler) refreshToken(r *http.Request) (TokenResponse, error) {
 	refreshToken := r.Form.Get("refresh_token")
 	token, err := jwt.ParseWithClaims(refreshToken, &RefreshTokenClaims{}, func(token *jwt.Token) (interface{}, error) {
 		// Ensure correct signing method
@@ -179,7 +178,7 @@ func (h *Handler) refreshToken(r *http.Request) (TokenResponse, error) {
 		if !ok {
 			return nil, fmt.Errorf("can't find kid")
 		}
-		pubKey, err := h.jwks.GetPublicKey(kid)
+		pubKey, err := h.jwks.getPublicKey(kid)
 		if err != nil {
 			return nil, err //TODO msg
 		}
@@ -225,7 +224,7 @@ func (h *Handler) refreshToken(r *http.Request) (TokenResponse, error) {
 	return h.createResponse(rancherToken, oidcClient, "", claims.Scope)
 }
 
-func (h *Handler) createResponse(rancherToken *v3.Token, oidcClient *v3.OIDCClient, nonce string, scopes []string) (TokenResponse, error) {
+func (h *tokenHandler) createResponse(rancherToken *v3.Token, oidcClient *v3.OIDCClient, nonce string, scopes []string) (TokenResponse, error) {
 	if rancherToken.Expired {
 		return TokenResponse{}, fmt.Errorf("rancher token is expired")
 	}
@@ -261,7 +260,7 @@ func (h *Handler) createResponse(rancherToken *v3.Token, oidcClient *v3.OIDCClie
 			}
 		}
 	}
-	key, kid, err := h.jwks.GetSigningKey()
+	key, kid, err := h.jwks.getSigningKey()
 	if err != nil {
 		return TokenResponse{}, err
 	}
@@ -349,7 +348,7 @@ func (h *Handler) createResponse(rancherToken *v3.Token, oidcClient *v3.OIDCClie
 	return resp, nil
 }
 
-func (h *Handler) addOIDCClientIDToRancherToken(oidcClientName string, rancherTokenName string) error {
+func (h *tokenHandler) addOIDCClientIDToRancherToken(oidcClientName string, rancherTokenName string) error {
 	patch, err := json.Marshal([]struct {
 		Op    string `json:"op"`
 		Path  string `json:"path"`
@@ -367,7 +366,7 @@ func (h *Handler) addOIDCClientIDToRancherToken(oidcClientName string, rancherTo
 	return err
 }
 
-func (h *Handler) getOIDCClientByClientID(clientID string) (*v3.OIDCClient, error) {
+func (h *tokenHandler) getOIDCClientByClientID(clientID string) (*v3.OIDCClient, error) {
 	oidcClients, err := h.oidcClientCache.GetByIndex("oidc.management.cattle.io/oidcclient-by-id", clientID) //TODO index const?
 	if err != nil {
 		return nil, fmt.Errorf("error retreiving OIDC client: %v", err)

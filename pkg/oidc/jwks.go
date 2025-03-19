@@ -131,7 +131,7 @@ func (h *jwksHandler) jwksEndpoint(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetSigningKey returns the key used for signing jwt tokens
-func (h *jwksHandler) GetSigningKey() (*rsa.PrivateKey, string, error) {
+func (h *jwksHandler) getSigningKey() (*rsa.PrivateKey, string, error) {
 	s, err := h.secretCache.Get(keySecretNamespace, keySecretName)
 	if err != nil {
 		return nil, "", err
@@ -145,7 +145,7 @@ func (h *jwksHandler) GetSigningKey() (*rsa.PrivateKey, string, error) {
 }
 
 // GetPublicKey returns the public key specified by the kid
-func (h *jwksHandler) GetPublicKey(kid string) (*rsa.PublicKey, error) {
+func (h *jwksHandler) getPublicKey(kid string) (*rsa.PublicKey, error) {
 	s, err := h.secretCache.Get(keySecretNamespace, keySecretName)
 	if err != nil {
 		return nil, err

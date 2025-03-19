@@ -41,9 +41,9 @@ func (m *MockSigningKeyGetter) EXPECT() *MockSigningKeyGetterMockRecorder {
 }
 
 // GetPublicKey mocks base method.
-func (m *MockSigningKeyGetter) GetPublicKey(kid string) (*rsa.PublicKey, error) {
+func (m *MockSigningKeyGetter) getPublicKey(kid string) (*rsa.PublicKey, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetPublicKey", kid)
+	ret := m.ctrl.Call(m, "getPublicKey", kid)
 	ret0, _ := ret[0].(*rsa.PublicKey)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
@@ -52,13 +52,13 @@ func (m *MockSigningKeyGetter) GetPublicKey(kid string) (*rsa.PublicKey, error) 
 // GetPublicKey indicates an expected call of GetPublicKey.
 func (mr *MockSigningKeyGetterMockRecorder) GetPublicKey(kid any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPublicKey", reflect.TypeOf((*MockSigningKeyGetter)(nil).GetPublicKey), kid)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "getPublicKey", reflect.TypeOf((*MockSigningKeyGetter)(nil).getPublicKey), kid)
 }
 
 // GetSigningKey mocks base method.
 func (m *MockSigningKeyGetter) GetSigningKey() (*rsa.PrivateKey, string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetSigningKey")
+	ret := m.ctrl.Call(m, "getSigningKey")
 	ret0, _ := ret[0].(*rsa.PrivateKey)
 	ret1, _ := ret[1].(string)
 	ret2, _ := ret[2].(error)
@@ -68,5 +68,5 @@ func (m *MockSigningKeyGetter) GetSigningKey() (*rsa.PrivateKey, string, error) 
 // GetSigningKey indicates an expected call of GetSigningKey.
 func (mr *MockSigningKeyGetterMockRecorder) GetSigningKey() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSigningKey", reflect.TypeOf((*MockSigningKeyGetter)(nil).GetSigningKey))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "getSigningKey", reflect.TypeOf((*MockSigningKeyGetter)(nil).GetSigningKey))
 }

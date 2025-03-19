@@ -1,4 +1,4 @@
-package auth
+package oidc
 
 import (
 	"fmt"
@@ -35,27 +35,31 @@ type CodeCreator interface {
 	GenerateCode() (string, error)
 }
 
-type Handler struct {
+type sessionAdder interface {
+	Add(code string, session session.Session) error
+}
+
+type authorizeHandler struct {
 	tokenCache      wrangmgmtv3.TokenCache
 	userLister      wrangmgmtv3.UserCache
 	oidcClientCache wrangmgmtv3.OIDCClientCache
-	storage         session.Storage
+	sessionAdder    sessionAdder
 	codeCreator     CodeCreator
 	now             func() time.Time
 }
 
-func NewHandler(tokenCache wrangmgmtv3.TokenCache, userLister wrangmgmtv3.UserCache, storage session.Storage, codeCreator CodeCreator, oidcClientCache wrangmgmtv3.OIDCClientCache) *Handler {
-	return &Handler{
+func newAuthorizeHandler(tokenCache wrangmgmtv3.TokenCache, userLister wrangmgmtv3.UserCache, sessionAdder sessionAdder, codeCreator CodeCreator, oidcClientCache wrangmgmtv3.OIDCClientCache) *authorizeHandler {
+	return &authorizeHandler{
 		tokenCache:      tokenCache,
 		userLister:      userLister,
-		storage:         storage,
+		sessionAdder:    sessionAdder,
 		codeCreator:     codeCreator,
 		oidcClientCache: oidcClientCache,
 		now:             time.Now,
 	}
 }
 
-func (h *Handler) AuthEndpoint(w http.ResponseWriter, r *http.Request) {
+func (h *authorizeHandler) authEndpoint(w http.ResponseWriter, r *http.Request) {
 	params, err := getAuthParamsFromRequest(r)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("error parsing parameters from request %v", err), http.StatusBadRequest)
@@ -109,7 +113,7 @@ func (h *Handler) AuthEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.storage.AddSession(code, session.Session{
+	err = h.sessionAdder.Add(code, session.Session{
 		ClientID:      params.clientID,
 		TokenName:     token.Name,
 		Scope:         params.scopes,
@@ -125,7 +129,7 @@ func (h *Handler) AuthEndpoint(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, params.redirectURI+"?code="+code+"&state="+params.state, http.StatusFound)
 }
 
-func (h *Handler) getAndVerifyRancherTokenFromRequest(r *http.Request) (*v3.Token, error) {
+func (h *authorizeHandler) getAndVerifyRancherTokenFromRequest(r *http.Request) (*v3.Token, error) {
 	tokenAuthValue := tokens.GetTokenAuthFromRequest(r)
 	if tokenAuthValue == "" {
 		return nil, fmt.Errorf("rancher token not present")

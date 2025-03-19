@@ -13,7 +13,6 @@ import (
 	providermocks "github.com/rancher/rancher/pkg/auth/providers/mocks"
 	"github.com/rancher/rancher/pkg/auth/tokens"
 	"github.com/rancher/rancher/pkg/oidc"
-	"github.com/rancher/rancher/pkg/oidc/token"
 	"github.com/rancher/rancher/pkg/settings"
 	"github.com/rancher/rancher/pkg/wrangler"
 	"github.com/rancher/rancher/tests/controllers/common"
@@ -62,7 +61,7 @@ func (s *OIDCProviderSuite) redirect(rw http.ResponseWriter, r *http.Request) {
 	oauth2Token, err := oauth2Config.Exchange(context.TODO(), r.URL.Query().Get("code"), oauth2.VerifierOption(codeVerifier))
 	assert.NoError(s.T(), err)
 
-	tokenResponse := token.TokenResponse{
+	tokenResponse := oidc.TokenResponse{
 		IDToken:      oauth2Token.Extra("id_token").(string),
 		AccessToken:  oauth2Token.AccessToken,
 		RefreshToken: oauth2Token.RefreshToken,
@@ -262,7 +261,7 @@ func (s *OIDCProviderSuite) TestLogin() {
 	assert.NoError(s.T(), err)
 	//b, _ := ioutil.ReadAll(res.Body)
 	//fmt.Println(b)
-	var tokenResponse *token.TokenResponse
+	var tokenResponse *oidc.TokenResponse
 	err = json.NewDecoder(res.Body).Decode(&tokenResponse)
 	assert.NoError(s.T(), err)
 
@@ -304,7 +303,7 @@ func (s *OIDCProviderSuite) TestLogin() {
 	//	body, _ := ioutil.ReadAll(resp.Body)
 	//	fmt.Printf("Refresh token: %s\n", string(body))
 
-	var refreshTokenResponse *token.TokenResponse
+	var refreshTokenResponse *oidc.TokenResponse
 	err = json.NewDecoder(resp.Body).Decode(&refreshTokenResponse)
 	assert.NoError(s.T(), err)
 

@@ -85,7 +85,7 @@ func TestAddSession(t *testing.T) {
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			storage := &SecretStorage{
+			storage := &SecretSessionStore{
 				secretCache:  test.secretCache(),
 				secretClient: test.secretClient(test.inputSession),
 				expiryTime:   time.Hour,
@@ -179,7 +179,7 @@ func TestGetAndRemoveSession(t *testing.T) {
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			storage := &SecretStorage{
+			storage := &SecretSessionStore{
 				secretClient: test.secretClient(),
 				expiryTime:   time.Hour,
 				mu:           sync.Mutex{},
@@ -273,7 +273,7 @@ func TestCleanUpExpiredSession(t *testing.T) {
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			storage := &SecretStorage{
+			storage := &SecretSessionStore{
 				secretClient: test.secretClient(),
 				secretCache:  test.secretCache(),
 				expiryTime:   time.Hour,

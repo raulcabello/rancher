@@ -1,7 +1,7 @@
 //go:generate mockgen -source=auth.go -destination=../mocks/auth.go -package=mocks
 //go:generate mockgen -source=../session/session.go -destination=../mocks/session.go -package=mocks
 
-package auth
+package oidc
 
 import (
 	"net/http"
@@ -296,13 +296,13 @@ func TestAuthEndpoint(t *testing.T) {
 			if test.mockSetup != nil {
 				test.mockSetup(m)
 			}
-			h := NewHandler(m.tokenCache, m.userLister, m.storage, m.codeCreator, m.oidcClientCache)
+			h := newAuthorizeHandler(m.tokenCache, m.userLister, m.storage, m.codeCreator, m.oidcClientCache)
 			h.now = func() time.Time {
 				return fakeTime
 			}
 			rec := httptest.NewRecorder()
 
-			h.AuthEndpoint(rec, test.req())
+			h.authEndpoint(rec, test.req())
 
 			assert.Equal(t, test.wantHttpCode, rec.Code)
 			if test.wantRedirect != "" {
