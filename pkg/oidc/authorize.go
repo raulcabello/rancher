@@ -3,6 +3,7 @@ package oidc
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/rancher/rancher/pkg/auth/providers"
 	"github.com/rancher/rancher/pkg/auth/tokens"
 	wrangmgmtv3 "github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io/v3"
+	oidcerror "github.com/rancher/rancher/pkg/oidc/error"
 	"github.com/rancher/rancher/pkg/oidc/session"
 	"github.com/rancher/rancher/pkg/settings"
 )
@@ -31,7 +33,7 @@ type authParams struct {
 	redirectURI         string
 }
 
-type CodeCreator interface {
+type codeCreator interface {
 	GenerateCode() (string, error)
 }
 
@@ -44,11 +46,11 @@ type authorizeHandler struct {
 	userLister      wrangmgmtv3.UserCache
 	oidcClientCache wrangmgmtv3.OIDCClientCache
 	sessionAdder    sessionAdder
-	codeCreator     CodeCreator
+	codeCreator     codeCreator
 	now             func() time.Time
 }
 
-func newAuthorizeHandler(tokenCache wrangmgmtv3.TokenCache, userLister wrangmgmtv3.UserCache, sessionAdder sessionAdder, codeCreator CodeCreator, oidcClientCache wrangmgmtv3.OIDCClientCache) *authorizeHandler {
+func newAuthorizeHandler(tokenCache wrangmgmtv3.TokenCache, userLister wrangmgmtv3.UserCache, sessionAdder sessionAdder, codeCreator codeCreator, oidcClientCache wrangmgmtv3.OIDCClientCache) *authorizeHandler {
 	return &authorizeHandler{
 		tokenCache:      tokenCache,
 		userLister:      userLister,
@@ -62,57 +64,82 @@ func newAuthorizeHandler(tokenCache wrangmgmtv3.TokenCache, userLister wrangmgmt
 func (h *authorizeHandler) authEndpoint(w http.ResponseWriter, r *http.Request) {
 	params, err := getAuthParamsFromRequest(r)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("error parsing parameters from request %v", err), http.StatusBadRequest)
+		oidcerror.WriteError(oidcerror.InvalidRequest, fmt.Sprintf("error parsing parameters from request %v", err), http.StatusBadRequest, w)
 		return
 	}
+	// validate all parameter as per the oidc spec.
+	if params.redirectURI == "" {
+		oidcerror.WriteError(oidcerror.InvalidRequest, "missing redirect_uri", http.StatusBadRequest, w)
+		return
+	}
+	if _, err := url.Parse(params.redirectURI); err != nil {
+		oidcerror.WriteError(oidcerror.InvalidRequest, "invalid redirect_uri", http.StatusBadRequest, w)
+	}
 	if params.responseType != supportedResponseType {
-		http.Error(w, fmt.Sprintf("invalid response type %v", params.responseType), http.StatusBadRequest)
+		oidcerror.RedirectWithError(params.redirectURI, oidcerror.UnsupportedResponseType, "response type not supported", params.state, w, r)
 		return
 	}
 	if params.codeChallengeMethod != supportedCodeChallengeMethod {
-		http.Error(w, "challenge_method not supported, only S256 is supported", http.StatusBadRequest)
+		oidcerror.RedirectWithError(params.redirectURI, oidcerror.InvalidRequest, "challenge_method not supported, only S256 is supported", params.state, w, r)
 		return
 	}
 	if !slices.Contains(params.scopes, "openid") {
-		http.Error(w, fmt.Sprintf("missing openid scope"), http.StatusBadRequest)
+		oidcerror.RedirectWithError(params.redirectURI, oidcerror.InvalidScope, "missing openid scope", params.state, w, r)
 		return
 	}
 	if params.codeChallenge == "" {
-		http.Error(w, fmt.Sprintf("missing code_challenge"), http.StatusBadRequest)
+		oidcerror.RedirectWithError(params.redirectURI, oidcerror.InvalidRequest, "missing code_challenge", params.state, w, r)
 		return
 	}
-	if params.redirectURI == "" {
-		http.Error(w, fmt.Sprintf("missing redirect_uri"), http.StatusBadRequest)
-		return
-	}
-	oidcClients, err := h.oidcClientCache.GetByIndex("oidc.management.cattle.io/oidcclient-by-id", params.clientID) //TODO index const?
+	oidcClients, err := h.oidcClientCache.GetByIndex(oidcClientByIDIndex, params.clientID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("error retreiving OIDC client: %v", err), http.StatusBadRequest)
+		oidcerror.RedirectWithError(params.redirectURI, oidcerror.ServerError, fmt.Sprintf("error retreiving OIDC client: %v", err), params.state, w, r)
 		return
 	}
 	if len(oidcClients) == 0 {
-		http.Error(w, fmt.Sprintf("no OIDC client found: %v", err), http.StatusBadRequest)
+		oidcerror.RedirectWithError(params.redirectURI, oidcerror.ServerError, fmt.Sprintf("OIDC client not found: %v", err), params.state, w, r)
 		return
 	}
 	oidcClient := oidcClients[0]
 
 	if !slices.Contains(oidcClient.Spec.RedirectURIs, params.redirectURI) {
-		http.Error(w, fmt.Sprintf("redirect_uri %s is not registered", params.redirectURI), http.StatusBadRequest)
+		oidcerror.RedirectWithError(params.redirectURI, oidcerror.InvalidRequest, fmt.Sprintf("redirect_uri %s is not registered", params.redirectURI), params.state, w, r)
 		return
 	}
+
 	token, err := h.getAndVerifyRancherTokenFromRequest(r)
+	// redirect to the login page if the token is not present or there is any error fetching it. We need to pass all the oidc parameters from the original request.
 	if err != nil {
-		// TODO improve
-		http.Redirect(w, r, settings.ServerURL.Get()+"/dashboard/auth/login?client_id="+r.URL.Query().Get("client_id")+"&redirect_uri="+r.URL.Query().Get("redirect_uri")+"&response_type=code&scope="+r.URL.Query().Get("scope")+"&state="+r.URL.Query().Get("state")+"&nonce="+r.URL.Query().Get("nonce")+"&code_challenge="+r.URL.Query().Get("code_challenge"), http.StatusFound) // TODO scope!
+		u, err := url.Parse(settings.ServerURL.Get() + "/dashboard/auth/login")
+		if err != nil {
+			oidcerror.RedirectWithError(params.redirectURI, oidcerror.InvalidRequest, "error parsing server url", params.state, w, r)
+			return
+		}
+		q := url.Values{}
+		q.Set("response_type", params.responseType)
+		q.Set("client_id", params.clientID)
+		q.Set("redirect_uri", params.redirectURI)
+		q.Set("scope", strings.Join(params.scopes, " "))
+		q.Set("code_challenge", params.codeChallenge)
+		if params.state != "" {
+			q.Set("state", params.state)
+		}
+		if params.nonce != "" {
+			q.Set("nonce", params.nonce)
+		}
+		u.RawQuery = q.Encode()
+
+		http.Redirect(w, r, u.String(), http.StatusFound)
 		return
 	}
 
 	code, err := h.codeCreator.GenerateCode()
 	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to generate code: %v", err), http.StatusBadRequest)
+		oidcerror.RedirectWithError(params.redirectURI, oidcerror.ServerError, fmt.Sprintf("failed to generate code: %v", err), params.state, w, r)
 		return
 	}
 
+	// store code and request info in a session. Session will be retrieved in the token endpoint using the code.
 	err = h.sessionAdder.Add(code, session.Session{
 		ClientID:      params.clientID,
 		TokenName:     token.Name,
@@ -122,10 +149,11 @@ func (h *authorizeHandler) authEndpoint(w http.ResponseWriter, r *http.Request) 
 		CreatedAt:     h.now(),
 	})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		oidcerror.RedirectWithError(params.redirectURI, oidcerror.ServerError, fmt.Sprintf("failed to store auth session: %v", err), params.state, w, r)
 		return
 	}
 
+	// redirect to the redirect_uri with a valid code
 	http.Redirect(w, r, params.redirectURI+"?code="+code+"&state="+params.state, http.StatusFound)
 }
 
@@ -173,6 +201,7 @@ func (h *authorizeHandler) getAndVerifyRancherTokenFromRequest(r *http.Request) 
 	return token, nil
 }
 
+// getAuthParamsFromRequest returns the params for the request. OIDC spec says that params can be either in a GET or POST request, so we should check both.
 func getAuthParamsFromRequest(r *http.Request) (*authParams, error) {
 	if r.Method == "POST" {
 		err := r.ParseForm()

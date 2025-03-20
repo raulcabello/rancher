@@ -86,7 +86,7 @@ func TestJWKSEndpoint(t *testing.T) {
 				return mock
 			},
 			expectedCode: http.StatusInternalServerError,
-			expectedBody: `{"error":"failed to get secret with public keys"}`,
+			expectedBody: `{"error":"server_error","error_description":"failed to get secret with public keys"}`,
 		},
 	}
 
@@ -159,7 +159,7 @@ func TestGetSigningKey(t *testing.T) {
 			t.Parallel()
 			h := jwksHandler{secretCache: test.secretCache()}
 
-			key, kid, err := h.getSigningKey()
+			key, kid, err := h.GetSigningKey()
 
 			if test.expectedErr != "" {
 				assert.EqualError(t, err, test.expectedErr)
@@ -227,7 +227,7 @@ func TestGetPublicKey(t *testing.T) {
 			t.Parallel()
 			h := jwksHandler{secretCache: test.secretCache()}
 
-			key, err := h.getPublicKey(test.kid)
+			key, err := h.GetPublicKey(test.kid)
 
 			if test.expectedErr != "" {
 				assert.EqualError(t, err, test.expectedErr)

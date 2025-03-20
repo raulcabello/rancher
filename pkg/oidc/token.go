@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	oidcerror "github.com/rancher/rancher/pkg/oidc/error"
 	"net/http"
 	"slices"
 	"strings"
@@ -26,13 +27,13 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-type SessionGetter interface {
+type sessionGetter interface {
 	GetAndRemove(code string) (session.Session, error)
 }
 
-type SigningKeyGetter interface {
-	getSigningKey() (*rsa.PrivateKey, string, error)
-	getPublicKey(kid string) (*rsa.PublicKey, error)
+type signingKeyGetter interface {
+	GetSigningKey() (*rsa.PrivateKey, string, error)
+	GetPublicKey(kid string) (*rsa.PublicKey, error)
 }
 
 type tokenHandler struct {
@@ -40,33 +41,43 @@ type tokenHandler struct {
 	tokenClient         wrangmgmtv3.TokenClient
 	userLister          wrangmgmtv3.UserCache
 	userAttributeLister wrangmgmtv3.UserAttributeCache
-	sessionGetter       SessionGetter
+	sessionGetter       sessionGetter
 	oidcClientCache     wrangmgmtv3.OIDCClientCache
+	oidcClient          wrangmgmtv3.OIDCClientClient
 	secretCache         corev1.SecretCache
 	oidcClientIndexer   cache.Indexer
-	jwks                SigningKeyGetter
+	jwks                signingKeyGetter
 	now                 func() time.Time
 }
 
+// TokenResponse represents a successful response returned by the token endpoint
 type TokenResponse struct {
-	IDToken      string `json:"id_token"`
-	AccessToken  string `json:"access_token"`
+	// IDToken is the oidc token generated.
+	IDToken string `json:"id_token"`
+	// AccessToken is the access token generated.
+	AccessToken string `json:"access_token"`
+	// AccessToken is the refresh token generated.
 	RefreshToken string `json:"refresh_token,omitempty"`
-	ExpiresIn    int    `json:"expires_in"`
+	// ExpiresIn indicates when id_token and access_token expire.
+	ExpiresIn int `json:"expires_in"`
 }
 
+// RefreshTokenClaims represent claims in the refresh_token
 type RefreshTokenClaims struct {
 	jwt.RegisteredClaims
-	RancherTokenHash string   `json:"rancher_token_hash"`
-	Scope            []string `json:"scope"`
+	// RancherTokenHash is the hash of the Rancher token used for refreshing the token.
+	RancherTokenHash string `json:"rancher_token_hash"`
+	// Scope indicates the scopes for this token.
+	Scope []string `json:"scope"`
 }
 
 func newTokenHandler(tokenCache wrangmgmtv3.TokenCache,
 	userLister wrangmgmtv3.UserCache,
 	userAttributeLister wrangmgmtv3.UserAttributeCache,
-	sessionGetter SessionGetter,
-	jwks SigningKeyGetter,
+	sessionGetter sessionGetter,
+	jwks signingKeyGetter,
 	oidcClientCache wrangmgmtv3.OIDCClientCache,
+	oidcClient wrangmgmtv3.OIDCClientClient,
 	secretCache corev1.SecretCache,
 	tokenClient wrangmgmtv3.TokenClient) *tokenHandler {
 
@@ -78,41 +89,42 @@ func newTokenHandler(tokenCache wrangmgmtv3.TokenCache,
 		sessionGetter:       sessionGetter,
 		jwks:                jwks,
 		oidcClientCache:     oidcClientCache,
+		oidcClient:          oidcClient,
 		secretCache:         secretCache,
 		now:                 time.Now,
 	}
 }
 
-func (h *tokenHandler) TokenEndpoint(w http.ResponseWriter, r *http.Request) {
+func (h *tokenHandler) tokenEndpoint(w http.ResponseWriter, r *http.Request) {
 	err := r.ParseForm()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		oidcerror.WriteError(oidcerror.InvalidRequest, fmt.Sprintf("error parsing parameters from request %v", err), http.StatusBadRequest, w)
 		return
 	}
 
 	switch r.Form.Get("grant_type") {
 	case "authorization_code":
-		tokenResponse, err := h.createTokenFromCode(r)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+		tokenResponse, oidcErr := h.createTokenFromCode(r)
+		if oidcErr != nil {
+			oidcErr.Write(http.StatusBadRequest, w)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		err = json.NewEncoder(w).Encode(tokenResponse)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			oidcerror.WriteError(oidcerror.ServerError, "failed to encode token response", http.StatusInternalServerError, w)
 			return
 		}
 	case "refresh_token":
-		tokens, err := h.refreshToken(r)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+		tokens, oidcErr := h.refreshToken(r)
+		if oidcErr != nil {
+			oidcErr.Write(http.StatusBadRequest, w)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		err = json.NewEncoder(w).Encode(tokens)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			oidcerror.WriteError(oidcerror.ServerError, "failed to encode refresh token response", http.StatusInternalServerError, w)
 			return
 		}
 	default:
@@ -121,10 +133,10 @@ func (h *tokenHandler) TokenEndpoint(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *tokenHandler) createTokenFromCode(r *http.Request) (TokenResponse, error) {
+func (h *tokenHandler) createTokenFromCode(r *http.Request) (TokenResponse, *oidcerror.Error) {
 	session, err := h.sessionGetter.GetAndRemove(r.FormValue("code"))
 	if err != nil {
-		return TokenResponse{}, err
+		return TokenResponse{}, oidcerror.New(oidcerror.ServerError, "failed to get session from code")
 	}
 	var clientID, _ string
 	clientID, clientSecret, ok := r.BasicAuth()
@@ -133,41 +145,44 @@ func (h *tokenHandler) createTokenFromCode(r *http.Request) (TokenResponse, erro
 		clientSecret = r.FormValue("client_secret")
 	}
 	if clientID != session.ClientID {
-		return TokenResponse{}, fmt.Errorf("invalid client_id")
+		return TokenResponse{}, oidcerror.New(oidcerror.InvalidRequest, "invalid client_id")
 	}
 	oidcClient, err := h.getOIDCClientByClientID(clientID)
 	if err != nil {
-		return TokenResponse{}, err
+		return TokenResponse{}, oidcerror.New(oidcerror.ServerError, "failed to get OIDC client")
 	}
-	secret, err := h.secretCache.Get("cattle-oidc-client-secrets", clientID) //TODO
+	secret, err := h.secretCache.Get(secretsNamespace, clientID)
 	if err != nil {
-		return TokenResponse{}, err
+		return TokenResponse{}, oidcerror.New(oidcerror.ServerError, "failed to get client secret")
 	}
 	clientSecretFound := false
-	for _, cs := range secret.Data {
+	for key, cs := range secret.Data {
 		if clientSecret == string(cs) {
 			clientSecretFound = true
+			if err := h.updateClientSecretUsedTimeStamp(oidcClient, key); err != nil {
+				return TokenResponse{}, oidcerror.New(oidcerror.ServerError, fmt.Sprintf("failed to add OIDC Client ID to Rancher token: %v", err))
+			}
 			break
 		}
 	}
 	if !clientSecretFound {
-		return TokenResponse{}, fmt.Errorf("invalid client secret")
+		return TokenResponse{}, oidcerror.New(oidcerror.InvalidRequest, "invalid client_secret")
 	}
 
 	code_verifier := r.Form.Get("code_verifier")
 	if session.CodeChallenge != oauth2.S256ChallengeFromVerifier(code_verifier) {
-		return TokenResponse{}, fmt.Errorf("failed to verify PKCE code challenge")
+		return TokenResponse{}, oidcerror.New(oidcerror.ServerError, "failed to verify PKCE code challenge")
 	}
 
 	rancherToken, err := h.tokenCache.Get(session.TokenName)
 	if err != nil {
-		return TokenResponse{}, err
+		return TokenResponse{}, oidcerror.New(oidcerror.ServerError, "failed to get Rancher token")
 	}
 
 	return h.createResponse(rancherToken, oidcClient, session.Nonce, session.Scope)
 }
 
-func (h *tokenHandler) refreshToken(r *http.Request) (TokenResponse, error) {
+func (h *tokenHandler) refreshToken(r *http.Request) (TokenResponse, *oidcerror.Error) {
 	refreshToken := r.Form.Get("refresh_token")
 	token, err := jwt.ParseWithClaims(refreshToken, &RefreshTokenClaims{}, func(token *jwt.Token) (interface{}, error) {
 		// Ensure correct signing method
@@ -178,7 +193,7 @@ func (h *tokenHandler) refreshToken(r *http.Request) (TokenResponse, error) {
 		if !ok {
 			return nil, fmt.Errorf("can't find kid")
 		}
-		pubKey, err := h.jwks.getPublicKey(kid)
+		pubKey, err := h.jwks.GetPublicKey(kid)
 		if err != nil {
 			return nil, err //TODO msg
 		}
@@ -186,18 +201,18 @@ func (h *tokenHandler) refreshToken(r *http.Request) (TokenResponse, error) {
 		return pubKey, nil
 	})
 	if err != nil {
-		return TokenResponse{}, err
+		return TokenResponse{}, oidcerror.New(oidcerror.ServerError, fmt.Sprintf("failed to parse refresh token: %v", err))
 	}
 	claims, ok := token.Claims.(*RefreshTokenClaims)
 	if !ok && !token.Valid {
-		return TokenResponse{}, fmt.Errorf("TODO")
+		return TokenResponse{}, oidcerror.New(oidcerror.ServerError, "refresh token not valid")
 	}
 
 	tokenList, err := h.tokenCache.List(labels.SelectorFromSet(map[string]string{
 		tokens.UserIDLabel: claims.Subject,
 	}))
 	if err != nil {
-		return TokenResponse{}, err
+		return TokenResponse{}, oidcerror.New(oidcerror.ServerError, fmt.Sprintf("failed to add OIDC Client ID to Rancher token: %v", err))
 	}
 	var rancherToken *v3.Token
 	for _, token := range tokenList {
@@ -210,46 +225,46 @@ func (h *tokenHandler) refreshToken(r *http.Request) (TokenResponse, error) {
 	}
 
 	if rancherToken == nil {
-		return TokenResponse{}, fmt.Errorf("can't find rancher token")
+		return TokenResponse{}, oidcerror.New(oidcerror.AccessDenied, "Rancher token no longer present.")
 	}
 
 	if len(claims.Audience) < 1 {
-		return TokenResponse{}, fmt.Errorf("can't find client in audience")
+		return TokenResponse{}, oidcerror.New(oidcerror.InvalidRequest, "can't find client in audience")
 	}
 	oidcClient, err := h.getOIDCClientByClientID(claims.Audience[0])
 	if err != nil {
-		return TokenResponse{}, fmt.Errorf("error retreiving OIDC client from audience: %v", err)
+		return TokenResponse{}, oidcerror.New(oidcerror.ServerError, fmt.Sprintf("failed to get oidc client: %v", err))
 	}
 
 	return h.createResponse(rancherToken, oidcClient, "", claims.Scope)
 }
 
-func (h *tokenHandler) createResponse(rancherToken *v3.Token, oidcClient *v3.OIDCClient, nonce string, scopes []string) (TokenResponse, error) {
+func (h *tokenHandler) createResponse(rancherToken *v3.Token, oidcClient *v3.OIDCClient, nonce string, scopes []string) (TokenResponse, *oidcerror.Error) {
 	if rancherToken.Expired {
-		return TokenResponse{}, fmt.Errorf("rancher token is expired")
+		return TokenResponse{}, oidcerror.New(oidcerror.AccessDenied, "Rancher token is expired")
 	}
 	if rancherToken.Enabled == nil || !*rancherToken.Enabled {
-		return TokenResponse{}, fmt.Errorf("rancher token is disabled")
+		return TokenResponse{}, oidcerror.New(oidcerror.AccessDenied, "Rancher token is disabled")
 	}
 	if rancherToken.AuthProvider != "" {
 		disabled, err := providers.IsDisabledProvider(rancherToken.AuthProvider)
 		if err != nil {
-			return TokenResponse{}, fmt.Errorf("can't check if auth provider is disabled: %v", err)
+			return TokenResponse{}, oidcerror.New(oidcerror.ServerError, fmt.Sprintf("can't check if auth provider is disabled: %v", err))
 		}
 		if disabled {
-			return TokenResponse{}, fmt.Errorf("auth provider is disabled")
+			return TokenResponse{}, oidcerror.New(oidcerror.AccessDenied, "auth provider is disabled")
 		}
 	}
 	user, err := h.userLister.Get(rancherToken.UserID)
 	if err != nil {
-		return TokenResponse{}, fmt.Errorf("can't get user: %v", err)
+		return TokenResponse{}, oidcerror.New(oidcerror.ServerError, fmt.Sprintf("can't get user: %v", err))
 	}
 	if user.Enabled != nil && !*user.Enabled {
-		return TokenResponse{}, fmt.Errorf("user is disabled")
+		return TokenResponse{}, oidcerror.New(oidcerror.AccessDenied, "user is disabled")
 	}
 	attribs, err := h.userAttributeLister.Get(rancherToken.UserID)
 	if err != nil && !apierrors.IsNotFound(err) {
-		return TokenResponse{}, fmt.Errorf("can't get user attributes: %v", err)
+		return TokenResponse{}, oidcerror.New(oidcerror.ServerError, fmt.Sprintf("can't get user attributes: %v", err))
 	}
 	var groups []string
 	if attribs != nil {
@@ -260,9 +275,9 @@ func (h *tokenHandler) createResponse(rancherToken *v3.Token, oidcClient *v3.OID
 			}
 		}
 	}
-	key, kid, err := h.jwks.getSigningKey()
+	key, kid, err := h.jwks.GetSigningKey()
 	if err != nil {
-		return TokenResponse{}, err
+		return TokenResponse{}, oidcerror.New(oidcerror.ServerError, fmt.Sprintf("failed to get signing key: %v", err))
 	}
 
 	idClaims := jwt.MapClaims{
@@ -288,13 +303,13 @@ func (h *tokenHandler) createResponse(rancherToken *v3.Token, oidcClient *v3.OID
 	idToken.Header["kid"] = kid
 	idTokenString, err := idToken.SignedString(key)
 	if err != nil {
-		return TokenResponse{}, err
+		return TokenResponse{}, oidcerror.New(oidcerror.ServerError, fmt.Sprintf("failed to sign id token: %v", err))
 	}
 
 	accessClaims := jwt.MapClaims{
 		"aud":   []string{oidcClient.Name},
 		"exp":   h.now().Add(oidcClient.Spec.TokenLifeSpan).Unix(),
-		"iss":   settings.ServerURL.Get() + "/oidc", //TODO
+		"iss":   settings.ServerURL.Get() + "/oidc",
 		"iat":   h.now().Unix(),
 		"sub":   rancherToken.UserID,
 		"scope": scopes,
@@ -307,7 +322,7 @@ func (h *tokenHandler) createResponse(rancherToken *v3.Token, oidcClient *v3.OID
 
 	accessTokenString, err := accessToken.SignedString(key)
 	if err != nil {
-		return TokenResponse{}, err
+		return TokenResponse{}, oidcerror.New(oidcerror.ServerError, fmt.Sprintf("failed to sign access token: %v", err))
 	}
 	resp := TokenResponse{
 		IDToken:     idTokenString,
@@ -334,18 +349,38 @@ func (h *tokenHandler) createResponse(rancherToken *v3.Token, oidcClient *v3.OID
 		refreshToken.Header["kid"] = kid
 		refreshTokenString, err := refreshToken.SignedString(key)
 		if err != nil {
-			return TokenResponse{}, err
+			return TokenResponse{}, oidcerror.New(oidcerror.ServerError, fmt.Sprintf("failed to sign refresh token: %v", err))
 		}
 		resp.RefreshToken = refreshTokenString
 
 		if err := h.addOIDCClientIDToRancherToken(oidcClient.Name, rancherToken.Name); err != nil {
-			return TokenResponse{}, err
+			return TokenResponse{}, oidcerror.New(oidcerror.ServerError, fmt.Sprintf("failed to add OIDC Client ID to Rancher token: %v", err))
 		}
 	}
 
 	resp.ExpiresIn = int(oidcClient.Spec.TokenLifeSpan.Seconds())
 
 	return resp, nil
+}
+
+func (h *tokenHandler) updateClientSecretUsedTimeStamp(oidcClient *v3.OIDCClient, clientSecretID string) interface{} {
+	patch, err := json.Marshal([]struct {
+		Op    string `json:"op"`
+		Path  string `json:"path"`
+		Value any    `json:"value"`
+	}{{
+		Op:    "add",
+		Path:  "/metadata/annotations/cattle.io/oidc-client-secret-used-" + clientSecretID,
+		Value: h.now().String(),
+	}})
+	if err != nil {
+		return err
+	}
+
+	_, err = h.oidcClient.Patch(oidcClient.Name, types.JSONPatchType, patch)
+	//TODO err!
+
+	return nil
 }
 
 func (h *tokenHandler) addOIDCClientIDToRancherToken(oidcClientName string, rancherTokenName string) error {
@@ -367,7 +402,7 @@ func (h *tokenHandler) addOIDCClientIDToRancherToken(oidcClientName string, ranc
 }
 
 func (h *tokenHandler) getOIDCClientByClientID(clientID string) (*v3.OIDCClient, error) {
-	oidcClients, err := h.oidcClientCache.GetByIndex("oidc.management.cattle.io/oidcclient-by-id", clientID) //TODO index const?
+	oidcClients, err := h.oidcClientCache.GetByIndex(oidcClientByIDIndex, clientID)
 	if err != nil {
 		return nil, fmt.Errorf("error retreiving OIDC client: %v", err)
 	}

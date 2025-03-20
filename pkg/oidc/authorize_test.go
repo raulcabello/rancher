@@ -1,12 +1,11 @@
-//go:generate mockgen -source=auth.go -destination=../mocks/auth.go -package=mocks
-//go:generate mockgen -source=../session/session.go -destination=../mocks/session.go -package=mocks
-
 package oidc
 
 import (
+	"github.com/rancher/rancher/pkg/settings"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,14 +29,16 @@ func TestAuthEndpoint(t *testing.T) {
 		fakeRedirectUri = "https://www.rancher.com"
 		fakeClientID    = "client-id"
 		fakeClientName  = "client-name"
+		fakeServerUrl   = "https://www.fake.com"
 	)
 	type mockParams struct {
 		tokenCache      *fake.MockNonNamespacedCacheInterface[*v3.Token]
 		userLister      *fake.MockNonNamespacedCacheInterface[*v3.User]
 		oidcClientCache *fake.MockNonNamespacedCacheInterface[*v3.OIDCClient]
-		codeCreator     *mocks.MockCodeCreator
-		storage         *mocks.MockStorage
+		codeCreator     *mocks.MockcodeCreator
+		sessionAdder    *mocks.MocksessionAdder
 	}
+	_ = settings.ServerURL.Set(fakeServerUrl)
 	fakeTime := time.Unix(0, 0)
 	ctrl := gomock.NewController(t)
 	tests := map[string]struct {
@@ -61,7 +62,7 @@ func TestAuthEndpoint(t *testing.T) {
 						Name: fakeUserID,
 					},
 				}, nil)
-				m.storage.EXPECT().AddSession(fakeCode, session.Session{
+				m.sessionAdder.EXPECT().Add(fakeCode, session.Session{
 					ClientID:      fakeClientID,
 					TokenName:     fakeTokenName,
 					Scope:         []string{"openid"},
@@ -128,7 +129,7 @@ func TestAuthEndpoint(t *testing.T) {
 				}, nil)
 			},
 			wantHttpCode: http.StatusFound,
-			wantRedirect: "/dashboard/auth/login?client_id=client-id&redirect_uri=https://www.rancher.com&response_type=code&scope=openid&state=&nonce=&code_challenge=code-challenge",
+			wantRedirect: fakeServerUrl + "/dashboard/auth/login?client_id=client-id&code_challenge=code-challenge&redirect_uri=https%3A%2F%2Fwww.rancher.com&response_type=code&scope=openid",
 		},
 		"response type not supported": {
 			req: func() *http.Request {
@@ -146,8 +147,8 @@ func TestAuthEndpoint(t *testing.T) {
 
 				return req
 			},
-			wantHttpCode: http.StatusBadRequest,
-			wantError:    "invalid response type none\n",
+			wantHttpCode: http.StatusFound,
+			wantRedirect: fakeRedirectUri + "?error=unsupported_response_type&error_description=response+type+not+supported",
 		},
 		"code challenge method not supported": {
 			req: func() *http.Request {
@@ -165,8 +166,8 @@ func TestAuthEndpoint(t *testing.T) {
 
 				return req
 			},
-			wantHttpCode: http.StatusBadRequest,
-			wantError:    "challenge_method not supported, only S256 is supported\n",
+			wantHttpCode: http.StatusFound,
+			wantRedirect: fakeRedirectUri + "?error=invalid_request&error_description=challenge_method+not+supported%2C+only+S256+is+supported",
 		},
 		"missing openid": {
 			req: func() *http.Request {
@@ -184,8 +185,8 @@ func TestAuthEndpoint(t *testing.T) {
 
 				return req
 			},
-			wantHttpCode: http.StatusBadRequest,
-			wantError:    "missing openid scope\n",
+			wantHttpCode: http.StatusFound,
+			wantRedirect: fakeRedirectUri + "?error=invalid_scope&error_description=missing+openid+scope",
 		},
 		"missing code challenge": {
 			req: func() *http.Request {
@@ -203,8 +204,8 @@ func TestAuthEndpoint(t *testing.T) {
 
 				return req
 			},
-			wantHttpCode: http.StatusBadRequest,
-			wantError:    "missing code_challenge\n",
+			wantHttpCode: http.StatusFound,
+			wantRedirect: fakeRedirectUri + "?error=invalid_request&error_description=missing+code_challenge",
 		},
 		"missing redirect uri": {
 			req: func() *http.Request {
@@ -212,7 +213,7 @@ func TestAuthEndpoint(t *testing.T) {
 					URL: &url.URL{
 						Scheme:   "https",
 						Host:     "rancher.com",
-						RawQuery: "code_challenge_method=S256&response_type=code&code_challenge=code-challenge&client_id=client-id&scope=profile&redirect_uri=" + fakeRedirectUri,
+						RawQuery: "code_challenge_method=S256&response_type=code&code_challenge=code-challenge&client_id=client-id&scope=openid",
 					},
 					Method: http.MethodGet,
 				}
@@ -223,7 +224,7 @@ func TestAuthEndpoint(t *testing.T) {
 				return req
 			},
 			wantHttpCode: http.StatusBadRequest,
-			wantError:    "missing openid scope\n",
+			wantError:    `{"error":"invalid_request","error_description":"missing redirect_uri"}`,
 		},
 		"oidc client not registered": {
 			mockSetup: func(m mockParams) {
@@ -244,8 +245,8 @@ func TestAuthEndpoint(t *testing.T) {
 
 				return req
 			},
-			wantHttpCode: http.StatusBadRequest,
-			wantError:    "error retreiving OIDC client:  \"client-id\" not found\n",
+			wantHttpCode: http.StatusFound,
+			wantRedirect: fakeRedirectUri + "?error=server_error&error_description=error+retreiving+OIDC+client%3A++%22client-id%22+not+found",
 		},
 		"redirect uri not registed": {
 			mockSetup: func(m mockParams) {
@@ -278,8 +279,8 @@ func TestAuthEndpoint(t *testing.T) {
 
 				return req
 			},
-			wantHttpCode: http.StatusBadRequest,
-			wantError:    "redirect_uri https://www.rancher.com is not registered\n",
+			wantHttpCode: http.StatusFound,
+			wantRedirect: fakeRedirectUri + "?error=invalid_request&error_description=redirect_uri+https%3A%2F%2Fwww.rancher.com+is+not+registered",
 		},
 	}
 
@@ -290,13 +291,13 @@ func TestAuthEndpoint(t *testing.T) {
 				tokenCache:      fake.NewMockNonNamespacedCacheInterface[*v3.Token](ctrl),
 				userLister:      fake.NewMockNonNamespacedCacheInterface[*v3.User](ctrl),
 				oidcClientCache: fake.NewMockNonNamespacedCacheInterface[*v3.OIDCClient](ctrl),
-				storage:         mocks.NewMockStorage(ctrl),
-				codeCreator:     mocks.NewMockCodeCreator(ctrl),
+				sessionAdder:    mocks.NewMocksessionAdder(ctrl),
+				codeCreator:     mocks.NewMockcodeCreator(ctrl),
 			}
 			if test.mockSetup != nil {
 				test.mockSetup(m)
 			}
-			h := newAuthorizeHandler(m.tokenCache, m.userLister, m.storage, m.codeCreator, m.oidcClientCache)
+			h := newAuthorizeHandler(m.tokenCache, m.userLister, m.sessionAdder, m.codeCreator, m.oidcClientCache)
 			h.now = func() time.Time {
 				return fakeTime
 			}
@@ -309,7 +310,7 @@ func TestAuthEndpoint(t *testing.T) {
 				assert.Equal(t, test.wantRedirect, rec.Header().Get("Location"))
 			}
 			if test.wantError != "" {
-				assert.Equal(t, test.wantError, rec.Body.String())
+				assert.Equal(t, test.wantError, strings.TrimSpace(rec.Body.String()))
 			}
 		})
 	}

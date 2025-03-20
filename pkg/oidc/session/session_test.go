@@ -18,7 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-func TestAddSession(t *testing.T) {
+func TestAdd(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	const (
 		fakeCode = "fake-code"
@@ -85,13 +85,13 @@ func TestAddSession(t *testing.T) {
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			storage := &SecretSessionStore{
+			store := &SecretSessionStore{
 				secretCache:  test.secretCache(),
 				secretClient: test.secretClient(test.inputSession),
 				expiryTime:   time.Hour,
 			}
 
-			err := storage.AddSession(test.inputCode, test.inputSession)
+			err := store.Add(test.inputCode, test.inputSession)
 
 			if test.expectedErrMsg == "" {
 				assert.NoError(t, err)
@@ -102,7 +102,7 @@ func TestAddSession(t *testing.T) {
 	}
 }
 
-func TestGetAndRemoveSession(t *testing.T) {
+func TestGetAndRemove(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	now := time.Now()
 	fakeSession := Session{
@@ -179,13 +179,13 @@ func TestGetAndRemoveSession(t *testing.T) {
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			storage := &SecretSessionStore{
+			store := &SecretSessionStore{
 				secretClient: test.secretClient(),
 				expiryTime:   time.Hour,
 				mu:           sync.Mutex{},
 			}
 
-			session, err := storage.GetAndRemoveSession(test.inputCode)
+			session, err := store.GetAndRemove(test.inputCode)
 
 			if test.expectedErrMsg == "" {
 				assert.NoError(t, err)

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strings"
 
+	oidcerror "github.com/rancher/rancher/pkg/oidc/error"
 	corecontrollers "github.com/rancher/wrangler/v3/pkg/generated/controllers/core/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -100,7 +101,7 @@ func newJWKSHandler(secretCache corecontrollers.SecretCache, secretClient coreco
 func (h *jwksHandler) jwksEndpoint(w http.ResponseWriter, r *http.Request) {
 	s, err := h.secretCache.Get(keySecretNamespace, keySecretName)
 	if err != nil {
-		writeError("failed to get secret with public keys", w, http.StatusInternalServerError)
+		oidcerror.WriteError(oidcerror.ServerError, "failed to get secret with public keys", http.StatusInternalServerError, w)
 		return
 	}
 	var keys []JWK
@@ -126,12 +127,12 @@ func (h *jwksHandler) jwksEndpoint(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(JWKS{Keys: keys}); err != nil {
-		writeError("failed to encode JWKS", w, http.StatusInternalServerError)
+		oidcerror.WriteError(oidcerror.ServerError, "failed to encode JWKS", http.StatusInternalServerError, w)
 	}
 }
 
 // GetSigningKey returns the key used for signing jwt tokens
-func (h *jwksHandler) getSigningKey() (*rsa.PrivateKey, string, error) {
+func (h *jwksHandler) GetSigningKey() (*rsa.PrivateKey, string, error) {
 	s, err := h.secretCache.Get(keySecretNamespace, keySecretName)
 	if err != nil {
 		return nil, "", err
@@ -145,7 +146,7 @@ func (h *jwksHandler) getSigningKey() (*rsa.PrivateKey, string, error) {
 }
 
 // GetPublicKey returns the public key specified by the kid
-func (h *jwksHandler) getPublicKey(kid string) (*rsa.PublicKey, error) {
+func (h *jwksHandler) GetPublicKey(kid string) (*rsa.PublicKey, error) {
 	s, err := h.secretCache.Get(keySecretNamespace, keySecretName)
 	if err != nil {
 		return nil, err

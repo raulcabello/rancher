@@ -91,6 +91,10 @@ func (s *OIDCProviderSuite) SetupSuite() {
 			SchemaObject: apimgmtv3.User{},
 			NonNamespace: true,
 		},
+		crd.CRD{
+			SchemaObject: apimgmtv3.OIDCClient{},
+			NonNamespace: true,
+		},
 	)
 
 	// Create wrangler context
@@ -201,6 +205,23 @@ func (s *OIDCProviderSuite) TestLogin() {
 	err = s.wranglerContext.Mgmt.OIDCClient().Informer().GetIndexer().Add(&v3.OIDCClient{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "oidc-client",
+		},
+		Spec: v3.OIDCClientSpec{
+			RedirectURIs:         []string{s.server.URL + "/redirect"},
+			TokenLifeSpan:        time.Hour,
+			RefreshTokenLifeSpan: 36 * time.Hour,
+		},
+		Status: v3.OIDCClientStatus{
+			ClientID: clientID,
+		},
+	})
+	assert.NoError(s.T(), err)
+	_, err = s.wranglerContext.Mgmt.OIDCClient().Create(&v3.OIDCClient{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "oidc-client",
+			Annotations: map[string]string{
+				"foo": "bar",
+			},
 		},
 		Spec: v3.OIDCClientSpec{
 			RedirectURIs:         []string{s.server.URL + "/redirect"},

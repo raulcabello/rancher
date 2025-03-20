@@ -68,7 +68,7 @@ func NewProvider(ctx context.Context, tokenCache wrangmgmtv3.TokenCache, tokenCl
 	return Provider{
 		jwksHandler:  jwks,
 		authHandler:  newAuthorizeHandler(tokenCache, userLister, sessionStorage, &randomstring.Generator{}, oidcClientCache),
-		tokenHandler: newTokenHandler(tokenCache, userLister, userAttributeLister, sessionStorage, jwks, oidcClientCache, secretCache, tokenClient),
+		tokenHandler: newTokenHandler(tokenCache, userLister, userAttributeLister, sessionStorage, jwks, oidcClientCache, oidcClientController, secretCache, tokenClient),
 	}, nil
 }
 
@@ -76,5 +76,5 @@ func (p *Provider) RegisterOIDCProviderHandles(mux *mux.Router) {
 	mux.HandleFunc("/oidc/.well-known/openid-configuration", openIDConfigurationEndpoint)
 	mux.HandleFunc("/oidc/.well-known/jwks.json", p.jwksHandler.jwksEndpoint)
 	mux.HandleFunc("/oidc/authorize", p.authHandler.authEndpoint)
-	mux.HandleFunc("/oidc/token", p.tokenHandler.TokenEndpoint)
+	mux.HandleFunc("/oidc/token", p.tokenHandler.tokenEndpoint)
 }

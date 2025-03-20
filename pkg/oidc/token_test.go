@@ -1,6 +1,3 @@
-//go:generate mockgen -source=../../auth/providers/common/provider.go -destination=../../auth/providers/mocks/provider.go -package=mocks
-//go:generate mockgen -source=./token.go -destination=../mocks/token.go -package=mocks
-
 package oidc
 
 import (
@@ -12,6 +9,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"testing"
 	"time"
 
 	"github.com/golang-jwt/jwt"
@@ -20,22 +21,16 @@ import (
 	providermocks "github.com/rancher/rancher/pkg/auth/providers/mocks"
 	"github.com/rancher/rancher/pkg/auth/tokens"
 	"github.com/rancher/rancher/pkg/oidc/mocks"
-	"github.com/rancher/rancher/pkg/settings"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/types"
-
-	"net/http"
-	"net/http/httptest"
-	"net/url"
-	"testing"
-
 	"github.com/rancher/rancher/pkg/oidc/session"
+	"github.com/rancher/rancher/pkg/settings"
 	"github.com/rancher/wrangler/v3/pkg/generic/fake"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/oauth2"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 )
 
@@ -46,10 +41,11 @@ func TestTokenEndpoint(t *testing.T) {
 		tokenClient        *fake.MockNonNamespacedClientInterface[*v3.Token, *v3.TokenList]
 		secretCache        *fake.MockCacheInterface[*v1.Secret]
 		oidcClientCache    *fake.MockNonNamespacedCacheInterface[*v3.OIDCClient]
+		oidcClient         *fake.MockNonNamespacedClientInterface[*v3.OIDCClient, *v3.OIDCClientList]
 		userLister         *fake.MockNonNamespacedCacheInterface[*v3.User]
 		useAttributeLister *fake.MockNonNamespacedCacheInterface[*v3.UserAttribute]
-		storage            *mocks.MockStorage
-		signingKeyGetter   *mocks.MockSigningKeyGetter
+		sessionGetter      *mocks.MocksessionGetter
+		signingKeyGetter   *mocks.MocksigningKeyGetter
 	}
 	const (
 		fakeCode                 = "code123"
@@ -62,6 +58,7 @@ func TestTokenEndpoint(t *testing.T) {
 		fakeUsername             = "username"
 		fakeGroup                = "group"
 		fakeSigningKey           = "key"
+		fakeClientSecretID       = "client-secret-1"
 		fakeTokenLifespan        = time.Hour
 		fakeRefreshTokenLifespan = 36 * time.Hour
 	)
@@ -136,9 +133,27 @@ func TestTokenEndpoint(t *testing.T) {
 	fakeRefreshTokenString, _ := fakeRefreshToken.SignedString(privateKey)
 	fakeClientk8sSecret := &v1.Secret{
 		Data: map[string][]byte{
-			"client-secret": []byte(fakeClientSecret),
+			fakeClientSecretID: []byte(fakeClientSecret),
 		},
 	}
+	clientSecretIDPatch, _ := json.Marshal([]struct {
+		Op    string `json:"op"`
+		Path  string `json:"path"`
+		Value any    `json:"value"`
+	}{{
+		Op:    "add",
+		Path:  "/metadata/annotations/cattle.io/oidc-client-secret-used-" + fakeClientSecretID,
+		Value: fakeTime().String(),
+	}})
+	tokenPatch, _ := json.Marshal([]struct {
+		Op    string `json:"op"`
+		Path  string `json:"path"`
+		Value any    `json:"value"`
+	}{{
+		Op:    "add",
+		Path:  "/metadata/labels/" + fakeClientID,
+		Value: "true",
+	}})
 	tests := map[string]struct {
 		req                    func() *http.Request
 		mockSetup              func(mockParams)
@@ -160,13 +175,14 @@ func TestTokenEndpoint(t *testing.T) {
 				return req
 			},
 			mockSetup: func(m mockParams) {
-				m.storage.EXPECT().GetAndRemoveSession(fakeCode).Return(fakeSession, nil)
+				m.sessionGetter.EXPECT().GetAndRemove(fakeCode).Return(fakeSession, nil)
 				m.secretCache.EXPECT().Get("cattle-oidc-client-secrets", fakeClientID).Return(fakeClientk8sSecret, nil)
 				m.oidcClientCache.EXPECT().GetByIndex("oidc.management.cattle.io/oidcclient-by-id", fakeClientID).Return([]*v3.OIDCClient{fakeOIDCClient}, nil)
 				m.tokenCache.EXPECT().Get(fakeTokenName).Return(fakeToken, nil)
 				m.userLister.EXPECT().Get(fakeUserID).Return(fakeUser, nil)
 				m.useAttributeLister.EXPECT().Get(fakeUserID).Return(fakeUserAttributes, nil)
 				m.signingKeyGetter.EXPECT().GetSigningKey().Return(privateKey, fakeSigningKey, nil)
+				m.oidcClient.EXPECT().Patch(fakeClientID, types.JSONPatchType, clientSecretIDPatch).Return(fakeOIDCClient, nil)
 			},
 			wantIdTokenClaims: &jwt.MapClaims{
 				"aud":                []interface{}{fakeClientID},
@@ -201,23 +217,15 @@ func TestTokenEndpoint(t *testing.T) {
 				return req
 			},
 			mockSetup: func(m mockParams) {
-				m.storage.EXPECT().GetAndRemoveSession(fakeCode).Return(fakeSessionOfflineAccess, nil)
+				m.sessionGetter.EXPECT().GetAndRemove(fakeCode).Return(fakeSessionOfflineAccess, nil)
 				m.secretCache.EXPECT().Get("cattle-oidc-client-secrets", fakeClientID).Return(fakeClientk8sSecret, nil)
 				m.oidcClientCache.EXPECT().GetByIndex("oidc.management.cattle.io/oidcclient-by-id", fakeClientID).Return([]*v3.OIDCClient{fakeOIDCClient}, nil)
 				m.tokenCache.EXPECT().Get(fakeTokenName).Return(fakeToken, nil)
 				m.userLister.EXPECT().Get(fakeUserID).Return(fakeUser, nil)
 				m.useAttributeLister.EXPECT().Get(fakeUserID).Return(fakeUserAttributes, nil)
-				patch, _ := json.Marshal([]struct {
-					Op    string `json:"op"`
-					Path  string `json:"path"`
-					Value any    `json:"value"`
-				}{{
-					Op:    "add",
-					Path:  "/metadata/labels/" + fakeClientID,
-					Value: "true",
-				}})
-				m.tokenClient.EXPECT().Patch(fakeTokenName, types.JSONPatchType, patch).Return(fakeToken, nil)
+				m.tokenClient.EXPECT().Patch(fakeTokenName, types.JSONPatchType, tokenPatch).Return(fakeToken, nil)
 				m.signingKeyGetter.EXPECT().GetSigningKey().Return(privateKey, fakeSigningKey, nil)
+				m.oidcClient.EXPECT().Patch(fakeClientID, types.JSONPatchType, clientSecretIDPatch).Return(fakeOIDCClient, nil)
 			},
 			wantIdTokenClaims: &jwt.MapClaims{
 				"aud":                []interface{}{fakeClientID},
@@ -312,13 +320,14 @@ func TestTokenEndpoint(t *testing.T) {
 		},
 	}
 
+	// register auth provider
+	mockProvider := providermocks.NewMockAuthProvider(ctrl)
+	mockProvider.EXPECT().IsDisabledProvider().Return(false, nil).AnyTimes()
+	providers.Providers[fakeAuthProvider] = mockProvider
+
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			// register auth provider
-			mockProvider := providermocks.NewMockAuthProvider(ctrl)
-			mockProvider.EXPECT().IsDisabledProvider().Return(false, nil).AnyTimes()
-			providers.Providers[fakeAuthProvider] = mockProvider
 			m := mockParams{
 				tokenCache:         fake.NewMockNonNamespacedCacheInterface[*v3.Token](ctrl),
 				tokenClient:        fake.NewMockNonNamespacedClientInterface[*v3.Token, *v3.TokenList](ctrl),
@@ -326,17 +335,18 @@ func TestTokenEndpoint(t *testing.T) {
 				userLister:         fake.NewMockNonNamespacedCacheInterface[*v3.User](ctrl),
 				useAttributeLister: fake.NewMockNonNamespacedCacheInterface[*v3.UserAttribute](ctrl),
 				oidcClientCache:    fake.NewMockNonNamespacedCacheInterface[*v3.OIDCClient](ctrl),
-				storage:            mocks.NewMockStorage(ctrl),
-				signingKeyGetter:   mocks.NewMockSigningKeyGetter(ctrl),
+				oidcClient:         fake.NewMockNonNamespacedClientInterface[*v3.OIDCClient, *v3.OIDCClientList](ctrl),
+				sessionGetter:      mocks.NewMocksessionGetter(ctrl),
+				signingKeyGetter:   mocks.NewMocksigningKeyGetter(ctrl),
 			}
 			if test.mockSetup != nil {
 				test.mockSetup(m)
 			}
-			h := newTokenHandler(m.tokenCache, m.userLister, m.useAttributeLister, m.storage, m.signingKeyGetter, m.oidcClientCache, m.secretCache, m.tokenClient)
+			h := newTokenHandler(m.tokenCache, m.userLister, m.useAttributeLister, m.sessionGetter, m.signingKeyGetter, m.oidcClientCache, m.oidcClient, m.secretCache, m.tokenClient)
 			h.now = fakeTime
 			rec := httptest.NewRecorder()
 
-			h.TokenEndpoint(rec, test.req())
+			h.tokenEndpoint(rec, test.req())
 
 			if test.wantError != "" {
 				assert.Equal(t, test.wantError, rec.Body.String())
