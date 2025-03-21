@@ -12,7 +12,7 @@ import (
 	"github.com/rancher/rancher/pkg/auth/providers"
 	providermocks "github.com/rancher/rancher/pkg/auth/providers/mocks"
 	"github.com/rancher/rancher/pkg/auth/tokens"
-	"github.com/rancher/rancher/pkg/oidc"
+	provider2 "github.com/rancher/rancher/pkg/oidc/provider"
 	"github.com/rancher/rancher/pkg/settings"
 	"github.com/rancher/rancher/pkg/wrangler"
 	"github.com/rancher/rancher/tests/controllers/common"
@@ -61,7 +61,7 @@ func (s *OIDCProviderSuite) redirect(rw http.ResponseWriter, r *http.Request) {
 	oauth2Token, err := oauth2Config.Exchange(context.TODO(), r.URL.Query().Get("code"), oauth2.VerifierOption(codeVerifier))
 	assert.NoError(s.T(), err)
 
-	tokenResponse := oidc.TokenResponse{
+	tokenResponse := provider2.TokenResponse{
 		IDToken:      oauth2Token.Extra("id_token").(string),
 		AccessToken:  oauth2Token.AccessToken,
 		RefreshToken: oauth2Token.RefreshToken,
@@ -153,7 +153,7 @@ func (s *OIDCProviderSuite) SetupSuite() {
 	mux := gmux.NewRouter()
 	mux.UseEncodedPath()
 
-	p, err := oidc.NewProvider(context.TODO(), s.wranglerContext.Mgmt.Token().Cache(), s.wranglerContext.Mgmt.Token(), s.wranglerContext.Mgmt.User().Cache(), s.wranglerContext.Mgmt.UserAttribute().Cache(), s.wranglerContext.Core.Secret().Cache(), s.wranglerContext.Core.Secret(), s.wranglerContext.Mgmt.OIDCClient().Cache(), s.wranglerContext.Mgmt.OIDCClient(), s.wranglerContext.Core.Namespace())
+	p, err := provider2.NewProvider(context.TODO(), s.wranglerContext.Mgmt.Token().Cache(), s.wranglerContext.Mgmt.Token(), s.wranglerContext.Mgmt.User().Cache(), s.wranglerContext.Mgmt.UserAttribute().Cache(), s.wranglerContext.Core.Secret().Cache(), s.wranglerContext.Core.Secret(), s.wranglerContext.Mgmt.OIDCClient().Cache(), s.wranglerContext.Mgmt.OIDCClient(), s.wranglerContext.Core.Namespace())
 	assert.NoError(s.T(), err)
 
 	p.RegisterOIDCProviderHandles(mux)
@@ -271,7 +271,7 @@ func (s *OIDCProviderSuite) TestLogin() {
 	assert.NoError(s.T(), err)
 	//b, _ := ioutil.ReadAll(res.Body)
 	//fmt.Println(b)
-	var tokenResponse *oidc.TokenResponse
+	var tokenResponse *provider2.TokenResponse
 	err = json.NewDecoder(res.Body).Decode(&tokenResponse)
 	assert.NoError(s.T(), err)
 
@@ -313,7 +313,7 @@ func (s *OIDCProviderSuite) TestLogin() {
 	//	body, _ := ioutil.ReadAll(resp.Body)
 	//	fmt.Printf("Refresh token: %s\n", string(body))
 
-	var refreshTokenResponse *oidc.TokenResponse
+	var refreshTokenResponse *provider2.TokenResponse
 	err = json.NewDecoder(resp.Body).Decode(&refreshTokenResponse)
 	assert.NoError(s.T(), err)
 

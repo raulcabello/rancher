@@ -1,4 +1,4 @@
-package oidc
+package provider
 
 import (
 	"bytes"
@@ -9,9 +9,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/rancher/rancher/pkg/oidc/provider/session"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,7 +25,6 @@ import (
 	providermocks "github.com/rancher/rancher/pkg/auth/providers/mocks"
 	"github.com/rancher/rancher/pkg/auth/tokens"
 	"github.com/rancher/rancher/pkg/oidc/mocks"
-	"github.com/rancher/rancher/pkg/oidc/session"
 	"github.com/rancher/rancher/pkg/settings"
 	"github.com/rancher/wrangler/v3/pkg/generic/fake"
 	"github.com/stretchr/testify/assert"
@@ -71,13 +74,13 @@ func TestTokenEndpoint(t *testing.T) {
 		return now
 	}
 	var privateKey *rsa.PrivateKey
-	fakeSession := session.Session{
+	fakeSession := &session.Session{
 		ClientID:      fakeClientID,
 		TokenName:     fakeTokenName,
 		Scope:         []string{"openid", "profile"},
 		CodeChallenge: oauth2.S256ChallengeFromVerifier(fakeCodeVerifier),
 	}
-	fakeSessionOfflineAccess := session.Session{
+	fakeSessionOfflineAccess := &session.Session{
 		ClientID:      fakeClientID,
 		TokenName:     fakeTokenName,
 		Scope:         []string{"openid", "profile", "offline_access"},
@@ -208,6 +211,71 @@ func TestTokenEndpoint(t *testing.T) {
 				"auth_provider": fakeAuthProvider,
 				"scope":         fakeScopes,
 			},
+		},
+		"authorization_code fails for an invalid code": {
+			req: func() *http.Request {
+				data := url.Values{}
+				data.Set("grant_type", "authorization_code")
+				data.Set("code", fakeCode)
+				data.Set("code_verifier", fakeCodeVerifier)
+				req, _ := http.NewRequest("POST", "https://rancher.com", bytes.NewBufferString(data.Encode()))
+				req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+				req.Header.Add("Authorization", fmt.Sprintf("Basic %s", base64.StdEncoding.EncodeToString([]byte(fakeClientID+":"+fakeClientSecret))))
+
+				return req
+			},
+			mockSetup: func(m mockParams) {
+				m.sessionClient.EXPECT().Get(fakeCode).Return(nil, errors.NewNotFound(schema.GroupResource{}, "secret not found"))
+			},
+			wantError: `{"error":"invalid_request","error_description":"invalid code"}`,
+		},
+		"authorization_code fails for an invalid client secret": {
+			req: func() *http.Request {
+				data := url.Values{}
+				data.Set("grant_type", "authorization_code")
+				data.Set("code", fakeCode)
+				data.Set("code_verifier", fakeCodeVerifier)
+				req, _ := http.NewRequest("POST", "https://rancher.com", bytes.NewBufferString(data.Encode()))
+				req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+				req.Header.Add("Authorization", fmt.Sprintf("Basic %s", base64.StdEncoding.EncodeToString([]byte(fakeClientID+":"+fakeClientSecret))))
+
+				return req
+			},
+			mockSetup: func(m mockParams) {
+				m.sessionClient.EXPECT().Get(fakeCode).Return(fakeSession, nil)
+				m.oidcClientCache.EXPECT().GetByIndex("oidc.management.cattle.io/oidcclient-by-id", fakeClientID).Return([]*v3.OIDCClient{fakeOIDCClient}, nil)
+				m.secretCache.EXPECT().Get("cattle-oidc-client-secrets", fakeClientID).Return(&v1.Secret{
+					Data: map[string][]byte{
+						fakeClientSecretID: []byte("invalid"),
+					},
+				}, nil)
+			},
+			wantError: `{"error":"invalid_request","error_description":"invalid client_secret"}`,
+		},
+		"authorization_code fails for an invalid code verifier (PKCE)": {
+			req: func() *http.Request {
+				data := url.Values{}
+				data.Set("grant_type", "authorization_code")
+				data.Set("code", fakeCode)
+				data.Set("code_verifier", fakeCodeVerifier)
+				req, _ := http.NewRequest("POST", "https://rancher.com", bytes.NewBufferString(data.Encode()))
+				req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+				req.Header.Add("Authorization", fmt.Sprintf("Basic %s", base64.StdEncoding.EncodeToString([]byte(fakeClientID+":"+fakeClientSecret))))
+
+				return req
+			},
+			mockSetup: func(m mockParams) {
+				m.sessionClient.EXPECT().Get(fakeCode).Return(&session.Session{
+					ClientID:      fakeClientID,
+					TokenName:     fakeTokenName,
+					Scope:         []string{"openid", "profile"},
+					CodeChallenge: "invalid",
+				}, nil)
+				m.oidcClientCache.EXPECT().GetByIndex("oidc.management.cattle.io/oidcclient-by-id", fakeClientID).Return([]*v3.OIDCClient{fakeOIDCClient}, nil)
+				m.secretCache.EXPECT().Get("cattle-oidc-client-secrets", fakeClientID).Return(fakeClientk8sSecret, nil)
+				m.oidcClient.EXPECT().Patch(fakeClientName, types.JSONPatchType, clientSecretIDPatch).Return(fakeOIDCClient, nil)
+			},
+			wantError: `{"error":"invalid_request","error_description":"failed to verify PKCE code challenge"}`,
 		},
 		"authorization_code returns a refresh_token when offline_token scope is provided": {
 			req: func() *http.Request {
@@ -344,7 +412,7 @@ func TestTokenEndpoint(t *testing.T) {
 			h.tokenEndpoint(rec, test.req())
 
 			if test.wantError != "" {
-				assert.Equal(t, test.wantError, rec.Body.String())
+				assert.Equal(t, test.wantError, strings.TrimSpace(rec.Body.String()))
 			} else {
 				var tokenResponse TokenResponse
 				err := json.Unmarshal(rec.Body.Bytes(), &tokenResponse)

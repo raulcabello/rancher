@@ -188,13 +188,13 @@ func TestGet(t *testing.T) {
 
 			if test.expectedErrMsg == "" {
 				assert.NoError(t, err)
+				assert.Equal(t, test.expectedSession.Nonce, session.Nonce)
+				assert.Equal(t, test.expectedSession.ClientID, session.ClientID)
+				assert.Equal(t, test.expectedSession.TokenName, session.TokenName)
+				assert.True(t, test.expectedSession.CreatedAt.Equal(session.CreatedAt))
 			} else {
 				assert.ErrorContains(t, err, test.expectedErrMsg)
 			}
-			assert.Equal(t, test.expectedSession.Nonce, session.Nonce)
-			assert.Equal(t, test.expectedSession.ClientID, session.ClientID)
-			assert.Equal(t, test.expectedSession.TokenName, session.TokenName)
-			assert.True(t, test.expectedSession.CreatedAt.Equal(session.CreatedAt))
 		})
 	}
 }

@@ -97,7 +97,7 @@ func (m *SecretSessionStore) Add(code string, session Session) error {
 }
 
 // GetAndRemove retrieves the session associated with the given code.
-func (m *SecretSessionStore) Get(code string) (Session, error) {
+func (m *SecretSessionStore) Get(code string) (*Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -115,20 +115,20 @@ func (m *SecretSessionStore) Get(code string) (Session, error) {
 		return true, nil
 	})
 	if err != nil {
-		return Session{}, fmt.Errorf("invalid code: %v", err)
+		return nil, fmt.Errorf("invalid code: %v", err)
 	}
 
 	var session Session
 	err = json.Unmarshal(secret.Data[secretKey], &session)
 	if err != nil {
-		return Session{}, fmt.Errorf("error unmarshalling session: %v", err)
+		return nil, fmt.Errorf("error unmarshalling session: %v", err)
 	}
 
 	if time.Since(session.CreatedAt) > m.expiryTime {
-		return Session{}, fmt.Errorf("the code has expired")
+		return nil, fmt.Errorf("the code has expired")
 	}
 
-	return session, nil
+	return &session, nil
 }
 
 // Remove removes the session associated with the given code.

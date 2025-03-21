@@ -26,8 +26,14 @@ type Error struct {
 	ErrorDescription string `json:"error_description"`
 }
 
+// Write writes the error in the response writer.
 func (e *Error) Write(code int, w http.ResponseWriter) {
 	WriteError(e.Error, e.ErrorDescription, code, w)
+}
+
+// ToString returns a string with the error and description.
+func (e *Error) ToString() string {
+	return e.Error + ": " + e.ErrorDescription
 }
 
 func New(errStr string, errDescription string) *Error {

@@ -1,4 +1,4 @@
-package oidc
+package provider
 
 import (
 	"net/http"
