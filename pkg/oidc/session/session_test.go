@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/json"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -102,7 +103,7 @@ func TestAdd(t *testing.T) {
 	}
 }
 
-func TestGetAndRemove(t *testing.T) {
+func TestGet(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	now := time.Now()
 	fakeSession := Session{
@@ -136,7 +137,6 @@ func TestGetAndRemove(t *testing.T) {
 						secretKey: sessionBytes,
 					},
 				}, nil)
-				mock.EXPECT().Delete(namespace, fakeCode, &metav1.DeleteOptions{}).Return(nil)
 
 				return mock
 			},
@@ -168,7 +168,6 @@ func TestGetAndRemove(t *testing.T) {
 						secretKey: sessionBytes,
 					},
 				}, nil)
-				mock.EXPECT().Delete(namespace, fakeCode, &metav1.DeleteOptions{}).Return(nil)
 
 				return mock
 			},
@@ -185,7 +184,7 @@ func TestGetAndRemove(t *testing.T) {
 				mu:           sync.Mutex{},
 			}
 
-			session, err := store.GetAndRemove(test.inputCode)
+			session, err := store.Get(test.inputCode)
 
 			if test.expectedErrMsg == "" {
 				assert.NoError(t, err)
@@ -291,6 +290,55 @@ func TestCleanUpExpiredSession(t *testing.T) {
 			c <- time.Unix(0, 0)
 			cancel()
 			wg.Wait()
+		})
+	}
+}
+
+func TestRemove(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	fakeCode := "code123"
+	tests := map[string]struct {
+		secretClient   func() corev1.SecretClient
+		inputCode      string
+		expectedErrMsg string
+	}{
+		"success delete": {
+			inputCode: fakeCode,
+			secretClient: func() corev1.SecretClient {
+				mock := fake.NewMockClientInterface[*v1.Secret, *v1.SecretList](ctrl)
+				mock.EXPECT().Delete(namespace, fakeCode, &metav1.DeleteOptions{}).Return(nil)
+
+				return mock
+			},
+		},
+		"delete failure": {
+			inputCode: fakeCode,
+			secretClient: func() corev1.SecretClient {
+				mock := fake.NewMockClientInterface[*v1.Secret, *v1.SecretList](ctrl)
+				mock.EXPECT().Delete(namespace, fakeCode, &metav1.DeleteOptions{}).Return(fmt.Errorf("unexpected error"))
+
+				return mock
+			},
+			expectedErrMsg: "unexpected error",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			store := &SecretSessionStore{
+				secretClient: test.secretClient(),
+				expiryTime:   time.Hour,
+				mu:           sync.Mutex{},
+			}
+
+			err := store.Remove(test.inputCode)
+
+			if test.expectedErrMsg == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.ErrorContains(t, err, test.expectedErrMsg)
+			}
 		})
 	}
 }

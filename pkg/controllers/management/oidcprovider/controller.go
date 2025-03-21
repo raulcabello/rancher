@@ -22,6 +22,7 @@ const (
 	createClientSecretAnn     = "cattle.io/oidc-client-secret-create"
 	removeClientSecretAnn     = "cattle.io/oidc-client-secret-remove"
 	regenerateClientSecretAnn = "cattle.io/oidc-client-secret-regenerate"
+	secretClientIDAnn         = "cattle.io/oidc-secret-client-id"
 	secretKeyPrefix           = "client-secret-"
 	secretNamespace           = "cattle-oidc-client-secrets"
 )
@@ -56,8 +57,10 @@ func (c *oidcClientController) onChange(_ string, oidcClient *v3.OIDCClient) (*v
 		return nil, nil
 	}
 
+	var clientID string
 	if oidcClient.Status.ClientID == "" {
-		clientID, err := c.generator.GenerateClientID()
+		var err error
+		clientID, err = c.generator.GenerateClientID()
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate clientID: %v", err)
 		}
@@ -94,10 +97,12 @@ func (c *oidcClientController) onChange(_ string, oidcClient *v3.OIDCClient) (*v
 		if err != nil {
 			return nil, err
 		}
-
+		if oidcClient.Status.ClientID != "" {
+			clientID = oidcClient.Status.ClientID
+		}
 		_, err = c.secretClient.Create(&v1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      oidcClient.Name,
+				Name:      clientID,
 				Namespace: secretNamespace,
 			},
 			StringData: map[string]string{

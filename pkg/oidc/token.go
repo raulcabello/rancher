@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	oidcerror "github.com/rancher/rancher/pkg/oidc/error"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"net/http"
 	"slices"
 	"strings"
@@ -21,14 +22,16 @@ import (
 	"github.com/rancher/rancher/pkg/settings"
 	corev1 "github.com/rancher/wrangler/v3/pkg/generated/controllers/core/v1"
 	"golang.org/x/oauth2"
+	"k8s.io/apimachinery/pkg/api/errors"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/cache"
 )
 
-type sessionGetter interface {
-	GetAndRemove(code string) (session.Session, error)
+type sessionGetterRemover interface {
+	Get(code string) (session.Session, error)
+	Remove(code string) error
 }
 
 type signingKeyGetter interface {
@@ -41,7 +44,7 @@ type tokenHandler struct {
 	tokenClient         wrangmgmtv3.TokenClient
 	userLister          wrangmgmtv3.UserCache
 	userAttributeLister wrangmgmtv3.UserAttributeCache
-	sessionGetter       sessionGetter
+	sessionClient       sessionGetterRemover
 	oidcClientCache     wrangmgmtv3.OIDCClientCache
 	oidcClient          wrangmgmtv3.OIDCClientClient
 	secretCache         corev1.SecretCache
@@ -74,7 +77,7 @@ type RefreshTokenClaims struct {
 func newTokenHandler(tokenCache wrangmgmtv3.TokenCache,
 	userLister wrangmgmtv3.UserCache,
 	userAttributeLister wrangmgmtv3.UserAttributeCache,
-	sessionGetter sessionGetter,
+	sessionClient sessionGetterRemover,
 	jwks signingKeyGetter,
 	oidcClientCache wrangmgmtv3.OIDCClientCache,
 	oidcClient wrangmgmtv3.OIDCClientClient,
@@ -86,7 +89,7 @@ func newTokenHandler(tokenCache wrangmgmtv3.TokenCache,
 		tokenClient:         tokenClient,
 		userLister:          userLister,
 		userAttributeLister: userAttributeLister,
-		sessionGetter:       sessionGetter,
+		sessionClient:       sessionClient,
 		jwks:                jwks,
 		oidcClientCache:     oidcClientCache,
 		oidcClient:          oidcClient,
@@ -134,7 +137,8 @@ func (h *tokenHandler) tokenEndpoint(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *tokenHandler) createTokenFromCode(r *http.Request) (TokenResponse, *oidcerror.Error) {
-	session, err := h.sessionGetter.GetAndRemove(r.FormValue("code"))
+	code := r.FormValue("code")
+	session, err := h.sessionClient.Get(code)
 	if err != nil {
 		return TokenResponse{}, oidcerror.New(oidcerror.ServerError, "failed to get session from code")
 	}
@@ -179,7 +183,15 @@ func (h *tokenHandler) createTokenFromCode(r *http.Request) (TokenResponse, *oid
 		return TokenResponse{}, oidcerror.New(oidcerror.ServerError, "failed to get Rancher token")
 	}
 
-	return h.createResponse(rancherToken, oidcClient, session.Nonce, session.Scope)
+	resp, oidcErr := h.createResponse(rancherToken, oidcClient, session.Nonce, session.Scope)
+	if oidcErr == nil {
+		err := h.sessionClient.Remove(code)
+		if err != nil && !errors.IsNotFound(err) {
+			//TODO log
+		}
+	}
+
+	return resp, oidcErr
 }
 
 func (h *tokenHandler) refreshToken(r *http.Request) (TokenResponse, *oidcerror.Error) {
@@ -243,7 +255,7 @@ func (h *tokenHandler) createResponse(rancherToken *v3.Token, oidcClient *v3.OID
 	if rancherToken.Expired {
 		return TokenResponse{}, oidcerror.New(oidcerror.AccessDenied, "Rancher token is expired")
 	}
-	if rancherToken.Enabled == nil || !*rancherToken.Enabled {
+	if rancherToken.Enabled != nil && !*rancherToken.Enabled {
 		return TokenResponse{}, oidcerror.New(oidcerror.AccessDenied, "Rancher token is disabled")
 	}
 	if rancherToken.AuthProvider != "" {
@@ -281,7 +293,7 @@ func (h *tokenHandler) createResponse(rancherToken *v3.Token, oidcClient *v3.OID
 	}
 
 	idClaims := jwt.MapClaims{
-		"aud": []string{oidcClient.Name},
+		"aud": []string{oidcClient.Status.ClientID},
 		"exp": h.now().Add(oidcClient.Spec.TokenLifeSpan).Unix(),
 		"iss": settings.ServerURL.Get() + "/oidc",
 		"iat": h.now().Unix(),
@@ -307,7 +319,7 @@ func (h *tokenHandler) createResponse(rancherToken *v3.Token, oidcClient *v3.OID
 	}
 
 	accessClaims := jwt.MapClaims{
-		"aud":   []string{oidcClient.Name},
+		"aud":   []string{oidcClient.Status.ClientID},
 		"exp":   h.now().Add(oidcClient.Spec.TokenLifeSpan).Unix(),
 		"iss":   settings.ServerURL.Get() + "/oidc",
 		"iat":   h.now().Unix(),
@@ -332,15 +344,13 @@ func (h *tokenHandler) createResponse(rancherToken *v3.Token, oidcClient *v3.OID
 	if slices.Contains(scopes, "offline_access") {
 		hash := sha256.Sum256([]byte(rancherToken.Name))
 		rancherTokenHash := hex.EncodeToString(hash[:])
-		refreshTokenID := oidcClient.Name + "-" + rancherToken.UserID
 		refreshClaims := jwt.MapClaims{
-			"aud":                []string{oidcClient.Name},
+			"aud":                []string{oidcClient.Status.ClientID},
 			"exp":                h.now().Add(oidcClient.Spec.RefreshTokenLifeSpan).Unix(),
 			"iat":                h.now().Unix(),
 			"sub":                rancherToken.UserID,
 			"rancher_token_hash": rancherTokenHash,
 			"scope":              scopes,
-			"id":                 refreshTokenID,
 		}
 		if rancherToken.AuthProvider != "" {
 			refreshClaims["auth_provider"] = rancherToken.AuthProvider
@@ -370,8 +380,8 @@ func (h *tokenHandler) updateClientSecretUsedTimeStamp(oidcClient *v3.OIDCClient
 		Value any    `json:"value"`
 	}{{
 		Op:    "add",
-		Path:  "/metadata/annotations/cattle.io/oidc-client-secret-used-" + clientSecretID,
-		Value: h.now().String(),
+		Path:  "/metadata/annotations/cattle.io.oidc-client-secret-used-" + clientSecretID,
+		Value: metav1.NewTime(h.now()),
 	}})
 	if err != nil {
 		return err
@@ -389,7 +399,7 @@ func (h *tokenHandler) addOIDCClientIDToRancherToken(oidcClientName string, ranc
 		Value any    `json:"value"`
 	}{{
 		Op:    "add",
-		Path:  "/metadata/labels/" + oidcClientName,
+		Path:  "/metadata/labels/cattle.io.oidc-client-" + oidcClientName,
 		Value: "true",
 	}})
 	if err != nil {

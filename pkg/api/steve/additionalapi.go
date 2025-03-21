@@ -2,6 +2,7 @@ package steve
 
 import (
 	"context"
+	"github.com/rancher/rancher/pkg/oidc"
 	"net/http"
 
 	gmux "github.com/gorilla/mux"
@@ -65,12 +66,12 @@ func AdditionalAPIs(ctx context.Context, config *wrangler.Context, steve *steve.
 	health.Register(mux)
 
 	//TODO check feature flag!
-	/*p, err := oidc.NewProvider(ctx, config.Mgmt.Token().Cache(), config.Mgmt.Token(), config.Mgmt.User().Cache(), config.Mgmt.UserAttribute().Cache(), config.Core.Secret().Cache(), config.Core.Secret(), config.Mgmt.OIDCClient().Cache(), config.Mgmt.OIDCClient(), config.Core.Namespace())
+	p, err := oidc.NewProvider(ctx, config.Mgmt.Token().Cache(), config.Mgmt.Token(), config.Mgmt.User().Cache(), config.Mgmt.UserAttribute().Cache(), config.Core.Secret().Cache(), config.Core.Secret(), config.Mgmt.OIDCClient().Cache(), config.Mgmt.OIDCClient(), config.Core.Namespace())
 	if err != nil {
 		return nil, err
 	}
 
-	p.RegisterOIDCProviderHandles(mux)*/
+	p.RegisterOIDCProviderHandles(mux)
 
 	return func(next http.Handler) http.Handler {
 		mux.NotFoundHandler = clusterAPI(next)

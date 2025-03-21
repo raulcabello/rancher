@@ -48,8 +48,8 @@ var (
 		Init(driverMetadataTypes).
 		Init(encryptionTypes).
 		Init(fleetTypes).
-		Init(notificationTypes)
-	//	Init(oidcProviderTypes)
+		Init(notificationTypes).
+		Init(oidcProviderTypes)
 
 	TokenSchemas = factory.Schemas(&Version).
 			Init(tokens)

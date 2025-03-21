@@ -17,43 +17,57 @@ import (
 	gomock "go.uber.org/mock/gomock"
 )
 
-// MocksessionGetter is a mock of sessionGetter interface.
-type MocksessionGetter struct {
+// MocksessionGetterRemover is a mock of sessionGetterRemover interface.
+type MocksessionGetterRemover struct {
 	ctrl     *gomock.Controller
-	recorder *MocksessionGetterMockRecorder
+	recorder *MocksessionGetterRemoverMockRecorder
 	isgomock struct{}
 }
 
-// MocksessionGetterMockRecorder is the mock recorder for MocksessionGetter.
-type MocksessionGetterMockRecorder struct {
-	mock *MocksessionGetter
+// MocksessionGetterRemoverMockRecorder is the mock recorder for MocksessionGetterRemover.
+type MocksessionGetterRemoverMockRecorder struct {
+	mock *MocksessionGetterRemover
 }
 
-// NewMocksessionGetter creates a new mock instance.
-func NewMocksessionGetter(ctrl *gomock.Controller) *MocksessionGetter {
-	mock := &MocksessionGetter{ctrl: ctrl}
-	mock.recorder = &MocksessionGetterMockRecorder{mock}
+// NewMocksessionGetterRemover creates a new mock instance.
+func NewMocksessionGetterRemover(ctrl *gomock.Controller) *MocksessionGetterRemover {
+	mock := &MocksessionGetterRemover{ctrl: ctrl}
+	mock.recorder = &MocksessionGetterRemoverMockRecorder{mock}
 	return mock
 }
 
 // EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MocksessionGetter) EXPECT() *MocksessionGetterMockRecorder {
+func (m *MocksessionGetterRemover) EXPECT() *MocksessionGetterRemoverMockRecorder {
 	return m.recorder
 }
 
-// GetAndRemove mocks base method.
-func (m *MocksessionGetter) GetAndRemove(code string) (session.Session, error) {
+// Get mocks base method.
+func (m *MocksessionGetterRemover) Get(code string) (session.Session, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetAndRemove", code)
+	ret := m.ctrl.Call(m, "Get", code)
 	ret0, _ := ret[0].(session.Session)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// GetAndRemove indicates an expected call of GetAndRemove.
-func (mr *MocksessionGetterMockRecorder) GetAndRemove(code any) *gomock.Call {
+// Get indicates an expected call of Get.
+func (mr *MocksessionGetterRemoverMockRecorder) Get(code any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAndRemove", reflect.TypeOf((*MocksessionGetter)(nil).GetAndRemove), code)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MocksessionGetterRemover)(nil).Get), code)
+}
+
+// Remove mocks base method.
+func (m *MocksessionGetterRemover) Remove(code string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Remove", code)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Remove indicates an expected call of Remove.
+func (mr *MocksessionGetterRemoverMockRecorder) Remove(code any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Remove", reflect.TypeOf((*MocksessionGetterRemover)(nil).Remove), code)
 }
 
 // MocksigningKeyGetter is a mock of signingKeyGetter interface.
