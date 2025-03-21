@@ -202,21 +202,7 @@ func (s *OIDCProviderSuite) TestLogin() {
 	})
 	assert.NoError(s.T(), err)
 
-	err = s.wranglerContext.Mgmt.OIDCClient().Informer().GetIndexer().Add(&v3.OIDCClient{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "oidc-client",
-		},
-		Spec: v3.OIDCClientSpec{
-			RedirectURIs:         []string{s.server.URL + "/redirect"},
-			TokenLifeSpan:        time.Hour,
-			RefreshTokenLifeSpan: 36 * time.Hour,
-		},
-		Status: v3.OIDCClientStatus{
-			ClientID: clientID,
-		},
-	})
-	assert.NoError(s.T(), err)
-	_, err = s.wranglerContext.Mgmt.OIDCClient().Create(&v3.OIDCClient{
+	oidcClient := &v3.OIDCClient{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "oidc-client",
 			Annotations: map[string]string{
@@ -231,7 +217,10 @@ func (s *OIDCProviderSuite) TestLogin() {
 		Status: v3.OIDCClientStatus{
 			ClientID: clientID,
 		},
-	})
+	}
+	err = s.wranglerContext.Mgmt.OIDCClient().Informer().GetIndexer().Add(oidcClient)
+	assert.NoError(s.T(), err)
+	_, err = s.wranglerContext.Mgmt.OIDCClient().Create(oidcClient)
 	assert.NoError(s.T(), err)
 	_, err = s.wranglerContext.Core.Secret().Create(&v1.Secret{
 		ObjectMeta: metav1.ObjectMeta{

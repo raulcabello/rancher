@@ -46,7 +46,7 @@ type jwksHandler struct {
 
 // newJWKSHandler returns a jwks handler. Creates a default signing key.
 func newJWKSHandler(secretCache corecontrollers.SecretCache, secretClient corecontrollers.SecretClient) (*jwksHandler, error) {
-	_, err := secretCache.Get(keySecretNamespace, keySecretName)
+	_, err := secretClient.Get(keySecretNamespace, keySecretName, metav1.GetOptions{})
 	if err != nil && !errors.IsNotFound(err) {
 		return nil, err
 	}

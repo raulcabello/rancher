@@ -378,9 +378,8 @@ func (h *tokenHandler) updateClientSecretUsedTimeStamp(oidcClient *v3.OIDCClient
 	}
 
 	_, err = h.oidcClient.Patch(oidcClient.Name, types.JSONPatchType, patch)
-	//TODO err!
 
-	return nil
+	return err
 }
 
 func (h *tokenHandler) addOIDCClientIDToRancherToken(oidcClientName string, rancherTokenName string) error {

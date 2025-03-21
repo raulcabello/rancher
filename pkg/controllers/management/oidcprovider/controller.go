@@ -6,7 +6,7 @@ import (
 	"fmt"
 	v3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	wrangmgmtv3 "github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io/v3"
-	"github.com/rancher/rancher/pkg/oidc/session"
+	"github.com/rancher/rancher/pkg/oidc/randomstring"
 	"github.com/rancher/rancher/pkg/wrangler"
 	corev1 "github.com/rancher/wrangler/v3/pkg/generated/controllers/core/v1"
 	v1 "k8s.io/api/core/v1"
@@ -46,7 +46,7 @@ func Register(ctx context.Context, wContext *wrangler.Context) {
 		secretCache:     wContext.Core.Secret().Cache(),
 		oidcClient:      wContext.Mgmt.OIDCClient(),
 		oidcClientCache: wContext.Mgmt.OIDCClient().Cache(),
-		generator:       &session.RandomStringGenerator{},
+		generator:       &randomstring.Generator{},
 	}
 	oidcClient.OnChange(ctx, "oidc-client-change", controller.onChange)
 }
