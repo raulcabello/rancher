@@ -31,8 +31,9 @@ func RegisterWrangler(ctx context.Context, wranglerContext *wrangler.Context, ma
 		}
 	}
 
-	//TODO check feature flag!
-	oidcprovider.Register(ctx, wranglerContext)
+	if features.OIDCProvider.Enabled() {
+		oidcprovider.Register(ctx, wranglerContext)
+	}
 
 	return nil
 }

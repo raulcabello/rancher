@@ -277,6 +277,61 @@ func TestTokenEndpoint(t *testing.T) {
 			},
 			wantError: `{"error":"invalid_request","error_description":"failed to verify PKCE code challenge"}`,
 		},
+		"authorization_code fails for a disabled token": {
+			req: func() *http.Request {
+				data := url.Values{}
+				data.Set("grant_type", "authorization_code")
+				data.Set("code", fakeCode)
+				data.Set("code_verifier", fakeCodeVerifier)
+				req, _ := http.NewRequest("POST", "https://rancher.com", bytes.NewBufferString(data.Encode()))
+				req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+				req.Header.Add("Authorization", fmt.Sprintf("Basic %s", base64.StdEncoding.EncodeToString([]byte(fakeClientID+":"+fakeClientSecret))))
+
+				return req
+			},
+			mockSetup: func(m mockParams) {
+				m.sessionClient.EXPECT().Get(fakeCode).Return(fakeSession, nil)
+				m.oidcClientCache.EXPECT().GetByIndex("oidc.management.cattle.io/oidcclient-by-id", fakeClientID).Return([]*v3.OIDCClient{fakeOIDCClient}, nil)
+				m.secretCache.EXPECT().Get("cattle-oidc-client-secrets", fakeClientID).Return(fakeClientk8sSecret, nil)
+				m.oidcClient.EXPECT().Patch(fakeClientName, types.JSONPatchType, clientSecretIDPatch).Return(fakeOIDCClient, nil)
+				m.tokenCache.EXPECT().Get(fakeTokenName).Return(&v3.Token{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: fakeTokenName,
+					},
+					UserID:       fakeUserID,
+					Enabled:      ptr.To(false),
+					AuthProvider: fakeAuthProvider,
+				}, nil)
+
+			},
+			wantError: `{"error":"access_denied","error_description":"Rancher token is disabled"}`,
+		},
+		"authorization_code fails for a disabled user": {
+			req: func() *http.Request {
+				data := url.Values{}
+				data.Set("grant_type", "authorization_code")
+				data.Set("code", fakeCode)
+				data.Set("code_verifier", fakeCodeVerifier)
+				req, _ := http.NewRequest("POST", "https://rancher.com", bytes.NewBufferString(data.Encode()))
+				req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+				req.Header.Add("Authorization", fmt.Sprintf("Basic %s", base64.StdEncoding.EncodeToString([]byte(fakeClientID+":"+fakeClientSecret))))
+
+				return req
+			},
+			mockSetup: func(m mockParams) {
+				m.sessionClient.EXPECT().Get(fakeCode).Return(fakeSession, nil)
+				m.oidcClientCache.EXPECT().GetByIndex("oidc.management.cattle.io/oidcclient-by-id", fakeClientID).Return([]*v3.OIDCClient{fakeOIDCClient}, nil)
+				m.secretCache.EXPECT().Get("cattle-oidc-client-secrets", fakeClientID).Return(fakeClientk8sSecret, nil)
+				m.oidcClient.EXPECT().Patch(fakeClientName, types.JSONPatchType, clientSecretIDPatch).Return(fakeOIDCClient, nil)
+				m.tokenCache.EXPECT().Get(fakeTokenName).Return(fakeToken, nil)
+				m.userLister.EXPECT().Get(fakeUserID).Return(&v3.User{
+					DisplayName: fakeUsername,
+					Enabled:     ptr.To(false),
+				}, nil)
+
+			},
+			wantError: `{"error":"access_denied","error_description":"user is disabled"}`,
+		},
 		"authorization_code returns a refresh_token when offline_token scope is provided": {
 			req: func() *http.Request {
 				data := url.Values{}
@@ -380,6 +435,91 @@ func TestTokenEndpoint(t *testing.T) {
 				"scope":              fakeScopesOfflineAccess,
 				"rancher_token_hash": rancherTokenHash,
 			},
+		},
+		"refresh_token fails to validate signature": {
+			req: func() *http.Request {
+				data := url.Values{}
+				data.Set("grant_type", "refresh_token")
+				data.Set("refresh_token", fakeRefreshTokenString)
+				req, _ := http.NewRequest("POST", "https://rancher.com", bytes.NewBufferString(data.Encode()))
+				req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+				req.Header.Add("Authorization", fmt.Sprintf("Basic %s", base64.StdEncoding.EncodeToString([]byte(fakeClientID+":"+fakeClientSecret))))
+
+				return req
+			},
+			mockSetup: func(m mockParams) {
+				anotherKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+				m.signingKeyGetter.EXPECT().GetPublicKey(fakeSigningKey).Return(&anotherKey.PublicKey, nil)
+			},
+			wantError: `{"error":"server_error","error_description":"failed to parse refresh token: token signature is invalid: crypto/rsa: verification error"}`,
+		},
+		"refresh_token fails when the associated Rancher token is no longer present": {
+			req: func() *http.Request {
+				data := url.Values{}
+				data.Set("grant_type", "refresh_token")
+				data.Set("refresh_token", fakeRefreshTokenString)
+				req, _ := http.NewRequest("POST", "https://rancher.com", bytes.NewBufferString(data.Encode()))
+				req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+				req.Header.Add("Authorization", fmt.Sprintf("Basic %s", base64.StdEncoding.EncodeToString([]byte(fakeClientID+":"+fakeClientSecret))))
+
+				return req
+			},
+			mockSetup: func(m mockParams) {
+				m.signingKeyGetter.EXPECT().GetPublicKey(fakeSigningKey).Return(&privateKey.PublicKey, nil)
+				m.tokenCache.EXPECT().List(labels.SelectorFromSet(map[string]string{
+					tokens.UserIDLabel: fakeUserID,
+				})).Return([]*v3.Token{}, nil)
+
+			},
+			wantError: `{"error":"access_denied","error_description":"Rancher token no longer present."}`,
+		},
+		"refresh_token fails when the OIDC client doesn't exist": {
+			req: func() *http.Request {
+				data := url.Values{}
+				data.Set("grant_type", "refresh_token")
+				data.Set("refresh_token", fakeRefreshTokenString)
+				req, _ := http.NewRequest("POST", "https://rancher.com", bytes.NewBufferString(data.Encode()))
+				req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+				req.Header.Add("Authorization", fmt.Sprintf("Basic %s", base64.StdEncoding.EncodeToString([]byte(fakeClientID+":"+fakeClientSecret))))
+
+				return req
+			},
+			mockSetup: func(m mockParams) {
+				m.signingKeyGetter.EXPECT().GetPublicKey(fakeSigningKey).Return(&privateKey.PublicKey, nil)
+				m.tokenCache.EXPECT().List(labels.SelectorFromSet(map[string]string{
+					tokens.UserIDLabel: fakeUserID,
+				})).Return(fakeTokenList, nil)
+				m.oidcClientCache.EXPECT().GetByIndex("oidc.management.cattle.io/oidcclient-by-id", fakeClientID).Return([]*v3.OIDCClient{}, nil)
+
+			},
+			wantError: `{"error":"server_error","error_description":"failed to get oidc client: no OIDC clients found"}`,
+		},
+		"refresh_token fails when it is expired": {
+			req: func() *http.Request {
+				refreshTokenExpired := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
+					"aud":                []string{fakeClientID},
+					"exp":                time.Unix(0, 0).Unix(),
+					"iat":                now.Unix(),
+					"sub":                fakeUserID,
+					"rancher_token_hash": rancherTokenHash,
+					"scope":              fakeScopesOfflineAccess,
+				})
+				refreshTokenExpired.Header["kid"] = fakeSigningKey
+				refreshTokenExpiredString, _ := refreshTokenExpired.SignedString(privateKey)
+
+				data := url.Values{}
+				data.Set("grant_type", "refresh_token")
+				data.Set("refresh_token", refreshTokenExpiredString)
+				req, _ := http.NewRequest("POST", "https://rancher.com", bytes.NewBufferString(data.Encode()))
+				req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+				req.Header.Add("Authorization", fmt.Sprintf("Basic %s", base64.StdEncoding.EncodeToString([]byte(fakeClientID+":"+fakeClientSecret))))
+
+				return req
+			},
+			mockSetup: func(m mockParams) {
+				m.signingKeyGetter.EXPECT().GetPublicKey(fakeSigningKey).Return(&privateKey.PublicKey, nil)
+			},
+			wantError: `{"error":"server_error","error_description":"failed to parse refresh token: token has invalid claims: token is expired"}`,
 		},
 	}
 

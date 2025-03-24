@@ -22,7 +22,6 @@ const (
 	createClientSecretAnn     = "cattle.io/oidc-client-secret-create"
 	removeClientSecretAnn     = "cattle.io/oidc-client-secret-remove"
 	regenerateClientSecretAnn = "cattle.io/oidc-client-secret-regenerate"
-	secretClientIDAnn         = "cattle.io/oidc-secret-client-id"
 	secretKeyPrefix           = "client-secret-"
 	secretNamespace           = "cattle-oidc-client-secrets"
 )
@@ -52,6 +51,7 @@ func Register(ctx context.Context, wContext *wrangler.Context) {
 	oidcClient.OnChange(ctx, "oidc-client-change", controller.onChange)
 }
 
+// TODO delete secret when deleting OIDC client!
 func (c *oidcClientController) onChange(_ string, oidcClient *v3.OIDCClient) (*v3.OIDCClient, error) {
 	if oidcClient == nil {
 		return nil, nil
@@ -100,7 +100,7 @@ func (c *oidcClientController) onChange(_ string, oidcClient *v3.OIDCClient) (*v
 		if oidcClient.Status.ClientID != "" {
 			clientID = oidcClient.Status.ClientID
 		}
-		_, err = c.secretClient.Create(&v1.Secret{
+		_, err = c.secretClient.Create(&v1.Secret{ //TODO wrangler owner reference?
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      clientID,
 				Namespace: secretNamespace,

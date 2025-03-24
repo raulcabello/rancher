@@ -22,9 +22,10 @@ const (
 )
 
 type Provider struct {
-	jwksHandler  *jwksHandler
-	authHandler  *authorizeHandler
-	tokenHandler *tokenHandler
+	jwksHandler     *jwksHandler
+	authHandler     *authorizeHandler
+	tokenHandler    *tokenHandler
+	userInfoHandler *userInfoHandler
 }
 
 func NewProvider(ctx context.Context, tokenCache wrangmgmtv3.TokenCache, tokenClient wrangmgmtv3.TokenClient, userLister wrangmgmtv3.UserCache, userAttributeLister wrangmgmtv3.UserAttributeCache, secretCache corecontrollers.SecretCache, secretClient corecontrollers.SecretClient, oidcClientCache wrangmgmtv3.OIDCClientCache, oidcClientController wrangmgmtv3.OIDCClientController, namespaceClient corecontrollers.NamespaceClient) (Provider, error) {
@@ -66,15 +67,18 @@ func NewProvider(ctx context.Context, tokenCache wrangmgmtv3.TokenCache, tokenCl
 	}
 
 	return Provider{
-		jwksHandler:  jwks,
-		authHandler:  newAuthorizeHandler(tokenCache, userLister, sessionStorage, &randomstring.Generator{}, oidcClientCache),
-		tokenHandler: newTokenHandler(tokenCache, userLister, userAttributeLister, sessionStorage, jwks, oidcClientCache, oidcClientController, secretCache, tokenClient),
+		jwksHandler:     jwks,
+		authHandler:     newAuthorizeHandler(tokenCache, userLister, sessionStorage, &randomstring.Generator{}, oidcClientCache),
+		tokenHandler:    newTokenHandler(tokenCache, userLister, userAttributeLister, sessionStorage, jwks, oidcClientCache, oidcClientController, secretCache, tokenClient),
+		userInfoHandler: newUserInfoHandler(userLister, userAttributeLister, jwks),
 	}, nil
 }
 
+// RegisterOIDCProviderHandles register all Handlers for the OIDC provider.
 func (p *Provider) RegisterOIDCProviderHandles(mux *mux.Router) {
 	mux.HandleFunc("/oidc/.well-known/openid-configuration", openIDConfigurationEndpoint)
 	mux.HandleFunc("/oidc/.well-known/jwks.json", p.jwksHandler.jwksEndpoint)
 	mux.HandleFunc("/oidc/authorize", p.authHandler.authEndpoint)
 	mux.HandleFunc("/oidc/token", p.tokenHandler.tokenEndpoint)
+	mux.HandleFunc("/oidc/userinfo", p.userInfoHandler.userInfoEndpoint)
 }
