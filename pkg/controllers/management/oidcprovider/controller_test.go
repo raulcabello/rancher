@@ -2,8 +2,10 @@ package oidcprovider
 
 import (
 	"encoding/json"
+	"fmt"
 	v3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/oidc/mocks"
+	corecontrollers "github.com/rancher/wrangler/v3/pkg/generated/controllers/core/v1"
 	"github.com/rancher/wrangler/v3/pkg/generic/fake"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/mock/gomock"
@@ -56,7 +58,7 @@ func TestOnChange(t *testing.T) {
 				p.generator.EXPECT().GenerateClientSecret().Return(fakeClientSecret, nil)
 				p.secretClient.EXPECT().Create(&v1.Secret{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      fakeOIDCClientName,
+						Name:      fakeClientId,
 						Namespace: secretNamespace,
 					},
 					StringData: map[string]string{
@@ -65,6 +67,7 @@ func TestOnChange(t *testing.T) {
 				}).Return(nil, nil)
 			},
 		},
+
 		"clientID and clientSecret are not created for an existing OIDCClient": {
 			oidcClient: &v3.OIDCClient{
 				ObjectMeta: metav1.ObjectMeta{
@@ -238,6 +241,59 @@ func TestOnChange(t *testing.T) {
 				assert.ErrorContains(t, err, test.expectedErr)
 			} else {
 				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestOnRemove(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	oidcClient := v3.OIDCClient{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "oidc-client",
+		},
+		Status: v3.OIDCClientStatus{
+			ClientID: "client-id",
+		},
+	}
+	tests := map[string]struct {
+		secretClient       func() corecontrollers.SecretClient
+		expectedOIDCClient *v3.OIDCClient
+		expectedErr        string
+	}{
+		"remove secret": {
+			secretClient: func() corecontrollers.SecretClient {
+				mock := fake.NewMockClientInterface[*v1.Secret, *v1.SecretList](ctrl)
+				mock.EXPECT().Delete(secretNamespace, oidcClient.Status.ClientID, &metav1.DeleteOptions{}).Return(nil)
+
+				return mock
+			},
+			expectedOIDCClient: &oidcClient,
+		},
+		"enqueue if can't delete secret": {
+			secretClient: func() corecontrollers.SecretClient {
+				mock := fake.NewMockClientInterface[*v1.Secret, *v1.SecretList](ctrl)
+				mock.EXPECT().Delete(secretNamespace, oidcClient.Status.ClientID, &metav1.DeleteOptions{}).Return(fmt.Errorf("fake error"))
+
+				return mock
+			},
+			expectedErr: "fake error",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			c := oidcClientController{
+				secretClient: test.secretClient(),
+			}
+
+			oidcClient, err := c.onRemove("", &oidcClient)
+			if test.expectedErr != "" {
+				assert.ErrorContains(t, err, test.expectedErr)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, test.expectedOIDCClient, oidcClient)
 			}
 		})
 	}

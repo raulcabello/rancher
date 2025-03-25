@@ -48,16 +48,19 @@ func Register(ctx context.Context, wContext *wrangler.Context) {
 		oidcClientCache: wContext.Mgmt.OIDCClient().Cache(),
 		generator:       &randomstring.Generator{},
 	}
-	oidcClient.OnChange(ctx, "oidc-client-change", controller.onChange)
+	oidcClient.OnChange(ctx, "oidcclient change", controller.onChange)
+	oidcClient.OnRemove(ctx, "oidcclient remove", controller.onRemove)
 }
 
-// TODO delete secret when deleting OIDC client!
+// onChange sets a new client id in the status field, and creates a k8s with the client secret.
 func (c *oidcClientController) onChange(_ string, oidcClient *v3.OIDCClient) (*v3.OIDCClient, error) {
 	if oidcClient == nil {
 		return nil, nil
 	}
 
 	var clientID string
+
+	// generate client id
 	if oidcClient.Status.ClientID == "" {
 		var err error
 		clientID, err = c.generator.GenerateClientID()
@@ -81,7 +84,7 @@ func (c *oidcClientController) onChange(_ string, oidcClient *v3.OIDCClient) (*v
 		if err != nil {
 			return nil, err
 		}
-
+		// add client id to status
 		_, err = c.oidcClient.Patch(oidcClient.Name, types.MergePatchType, patchBytes)
 		if err != nil {
 			return nil, err
@@ -92,6 +95,7 @@ func (c *oidcClientController) onChange(_ string, oidcClient *v3.OIDCClient) (*v
 	if err != nil && !errors.IsNotFound(err) {
 		return nil, err
 	}
+	// generate client secret and store it in a k8s secret.
 	if errors.IsNotFound(err) {
 		clientSecret, err := c.generator.GenerateClientSecret()
 		if err != nil {
@@ -100,7 +104,7 @@ func (c *oidcClientController) onChange(_ string, oidcClient *v3.OIDCClient) (*v
 		if oidcClient.Status.ClientID != "" {
 			clientID = oidcClient.Status.ClientID
 		}
-		_, err = c.secretClient.Create(&v1.Secret{ //TODO wrangler owner reference?
+		_, err = c.secretClient.Create(&v1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      clientID,
 				Namespace: secretNamespace,
@@ -114,6 +118,8 @@ func (c *oidcClientController) onChange(_ string, oidcClient *v3.OIDCClient) (*v
 		}
 	}
 
+	// create another client secret if the cattle.io/oidc-client-secret-create annotation is present.
+	// keys are incrementing. e.g. client-secret-1, client-secret-2,...
 	if _, ok := oidcClient.Annotations[createClientSecretAnn]; ok {
 		clientSecret, err := c.generator.GenerateClientSecret()
 		if err != nil {
@@ -145,6 +151,8 @@ func (c *oidcClientController) onChange(_ string, oidcClient *v3.OIDCClient) (*v
 		}
 	}
 
+	// regenerate client secret if the cattle.io/oidc-client-secret-create annotation is present.
+	// client secrets ids are comma separated
 	if clientSecretIDs, ok := oidcClient.Annotations[regenerateClientSecretAnn]; ok {
 		csids := strings.Split(clientSecretIDs, ",")
 		for _, csid := range csids {
@@ -168,6 +176,8 @@ func (c *oidcClientController) onChange(_ string, oidcClient *v3.OIDCClient) (*v
 		}
 	}
 
+	// remove client secret if the cattle.io/oidc-client-secret-create annotation is present.
+	// client secrets ids are comma separated
 	if clientSecretIDs, ok := oidcClient.Annotations[removeClientSecretAnn]; ok {
 		csids := strings.Split(clientSecretIDs, ",")
 		for _, csid := range csids {
@@ -183,6 +193,16 @@ func (c *oidcClientController) onChange(_ string, oidcClient *v3.OIDCClient) (*v
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	return oidcClient, nil
+}
+
+// onRemove removes the k8s secret that contains the client secret.
+func (c *oidcClientController) onRemove(_ string, oidcClient *v3.OIDCClient) (*v3.OIDCClient, error) {
+	err := c.secretClient.Delete(secretNamespace, oidcClient.Status.ClientID, &metav1.DeleteOptions{})
+	if err != nil && !errors.IsNotFound(err) {
+		return nil, err
 	}
 
 	return oidcClient, nil
