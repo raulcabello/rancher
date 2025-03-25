@@ -2,13 +2,14 @@ package provider
 
 import (
 	"fmt"
-	oidcerror "github.com/rancher/rancher/pkg/oidc/provider/error"
-	"github.com/rancher/rancher/pkg/oidc/provider/session"
 	"net/http"
 	"net/url"
 	"slices"
 	"strings"
 	"time"
+
+	oidcerror "github.com/rancher/rancher/pkg/oidc/provider/error"
+	"github.com/rancher/rancher/pkg/oidc/provider/session"
 
 	v3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/auth/providers"

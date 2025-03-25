@@ -3,13 +3,14 @@ package provider
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"slices"
+	"strings"
+
 	"github.com/golang-jwt/jwt"
 	wrangmgmtv3 "github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io/v3"
 	oidcerror "github.com/rancher/rancher/pkg/oidc/provider/error"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"net/http"
-	"slices"
-	"strings"
 )
 
 // UserInfoResponse represents the response from the userinfo endpoint.

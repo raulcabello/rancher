@@ -1,14 +1,15 @@
 package provider
 
 import (
-	"github.com/rancher/rancher/pkg/oidc/provider/session"
-	"github.com/rancher/rancher/pkg/settings"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rancher/rancher/pkg/oidc/provider/session"
+	"github.com/rancher/rancher/pkg/settings"
 
 	v3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/oidc/mocks"

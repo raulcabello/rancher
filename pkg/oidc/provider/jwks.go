@@ -8,10 +8,11 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	oidcerror "github.com/rancher/rancher/pkg/oidc/provider/error"
 	"math/big"
 	"net/http"
 	"strings"
+
+	oidcerror "github.com/rancher/rancher/pkg/oidc/provider/error"
 
 	corecontrollers "github.com/rancher/wrangler/v3/pkg/generated/controllers/core/v1"
 	corev1 "k8s.io/api/core/v1"
