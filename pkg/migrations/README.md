@@ -3,7 +3,7 @@ Exploratory Migrations
 
 This is just a PoC of migrating "database-style" resources in Rancher.
 
-`apply.go` contains the high-level `ApplyUnappliedMigrations` function applies
+`apply.go` contains the high-level `ApplyUnappliedMigrations` function which applies
 migrations that are not recorded as having been applied.
 
 `list.go` contains the `knownMigrations`,  migrations `Register()` themselves
