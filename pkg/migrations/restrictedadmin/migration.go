@@ -16,7 +16,7 @@ import (
 )
 
 func init() {
-	migrations.Register(restrictedAdminMigration{})
+	//migrations.Register(restrictedAdminMigration{})
 }
 
 type restrictedAdminMigration struct {

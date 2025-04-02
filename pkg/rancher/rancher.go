@@ -649,6 +649,7 @@ func applyAllMigrations(ctx context.Context, cfg *rest.Config) error {
 	if err != nil {
 		return fmt.Errorf("applying all migrations on startup: %w", err)
 	}
+	fmt.Println(applied)
 
 	return nil
 }
