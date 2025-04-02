@@ -46,7 +46,7 @@ func (u userMigration) Changes(ctx context.Context, client changes.Interface, op
 		return nil, fmt.Errorf("listing users to calculate migration: %s", err)
 	}
 
-	var resourceChanges []changes.ResourceChange
+	var changeSets []migrations.ChangeSet
 	var migrationErr error
 	for _, uns := range users.Items {
 		var user v3.User
@@ -80,7 +80,7 @@ func (u userMigration) Changes(ctx context.Context, client changes.Interface, op
 			}
 
 			unsSecret := &unstructured.Unstructured{Object: raw}
-			resourceChanges = append(resourceChanges,
+			changeSets = append(changeSets, migrations.ChangeSet{
 				changes.ResourceChange{
 					Operation: changes.OperationCreate,
 					Create:    &changes.CreateChange{Resource: unsSecret},
@@ -105,6 +105,7 @@ func (u userMigration) Changes(ctx context.Context, client changes.Interface, op
 						Type: changes.PatchApplicationJSON,
 					},
 				},
+			},
 			)
 		}
 	}
@@ -113,5 +114,5 @@ func (u userMigration) Changes(ctx context.Context, client changes.Interface, op
 		return nil, migrationErr
 	}
 
-	return &migrations.MigrationChanges{Changes: []migrations.ChangeSet{resourceChanges}}, nil
+	return &migrations.MigrationChanges{Changes: changeSets}, nil
 }
