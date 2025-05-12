@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/rancher/rancher/pkg/auth/providers/awscognito"
 	"io/ioutil"
 	"net/http"
 	"strconv"
@@ -176,6 +177,9 @@ func (h *loginHandler) createLoginToken(request *types.APIContext) (v3.Token, st
 	case client.GenericOIDCProviderType:
 		input = &apiv3.OIDCLogin{}
 		providerName = genericoidc.Name
+	case client.AWSCognitoProviderType:
+		input = &apiv3.OIDCLogin{}
+		providerName = awscognito.Name
 	default:
 		return v3.Token{}, "", "", httperror.NewAPIError(httperror.ServerError, "unknown authentication provider")
 	}

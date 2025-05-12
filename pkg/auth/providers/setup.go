@@ -27,6 +27,7 @@ var authConfigTypes = []string{
 	client.OIDCConfigType,
 	client.KeyCloakOIDCConfigType,
 	client.GenericOIDCConfigType,
+	client.AWSCognitoOIDCConfigType,
 }
 
 func SetupAuthConfig(ctx context.Context, management *config.ScaledContext, schemas *types.Schemas) {

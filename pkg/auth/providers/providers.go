@@ -9,6 +9,7 @@ import (
 	"github.com/rancher/norman/types"
 	"github.com/rancher/rancher/pkg/auth/accessor"
 	"github.com/rancher/rancher/pkg/auth/providers/activedirectory"
+	"github.com/rancher/rancher/pkg/auth/providers/awscognito"
 	"github.com/rancher/rancher/pkg/auth/providers/azure"
 	"github.com/rancher/rancher/pkg/auth/providers/common"
 	"github.com/rancher/rancher/pkg/auth/providers/genericoidc"
@@ -163,6 +164,14 @@ func Configure(ctx context.Context, mgmt *config.ScaledContext) {
 	Providers[genericoidc.Name] = p
 	providersByType[client.GenericOIDCConfigType] = p
 	providersByType[publicclient.GenericOIDCProviderType] = p
+
+	p = awscognito.Configure(ctx, mgmt, userMGR, tokenMGR)
+	ProviderNames[awscognito.Name] = true
+	providersWithSecrets[awscognito.Name] = true
+	UnrefreshableProviders[awscognito.Name] = true
+	Providers[awscognito.Name] = p
+	providersByType[client.AWSCognitoOIDCConfigType] = p
+	providersByType[publicclient.AWSCognitoProviderType] = p
 }
 
 func ProviderLogoutAll(apiContext *types.APIContext, token accessor.TokenAccessor) error {

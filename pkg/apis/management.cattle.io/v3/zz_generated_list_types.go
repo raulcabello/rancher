@@ -43,6 +43,23 @@ func NewAPIService(namespace, name string, obj APIService) *APIService {
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
+// AWSCognitoProviderList is a list of AWSCognitoProvider resources
+type AWSCognitoProviderList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata"`
+
+	Items []AWSCognitoProvider `json:"items"`
+}
+
+func NewAWSCognitoProvider(namespace, name string, obj AWSCognitoProvider) *AWSCognitoProvider {
+	obj.APIVersion, obj.Kind = SchemeGroupVersion.WithKind("AWSCognitoProvider").ToAPIVersionAndKind()
+	obj.Name = name
+	obj.Namespace = namespace
+	return &obj
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
 // ActiveDirectoryProviderList is a list of ActiveDirectoryProvider resources
 type ActiveDirectoryProviderList struct {
 	metav1.TypeMeta `json:",inline"`

@@ -32,6 +32,7 @@ func init() {
 
 type Interface interface {
 	APIService() APIServiceController
+	AWSCognitoProvider() AWSCognitoProviderController
 	ActiveDirectoryProvider() ActiveDirectoryProviderController
 	AuthConfig() AuthConfigController
 	AuthProvider() AuthProviderController
@@ -98,6 +99,10 @@ type version struct {
 
 func (v *version) APIService() APIServiceController {
 	return generic.NewNonNamespacedController[*v3.APIService, *v3.APIServiceList](schema.GroupVersionKind{Group: "management.cattle.io", Version: "v3", Kind: "APIService"}, "apiservices", v.controllerFactory)
+}
+
+func (v *version) AWSCognitoProvider() AWSCognitoProviderController {
+	return generic.NewNonNamespacedController[*v3.AWSCognitoProvider, *v3.AWSCognitoProviderList](schema.GroupVersionKind{Group: "management.cattle.io", Version: "v3", Kind: "AWSCognitoProvider"}, "awscognitoproviders", v.controllerFactory)
 }
 
 func (v *version) ActiveDirectoryProvider() ActiveDirectoryProviderController {

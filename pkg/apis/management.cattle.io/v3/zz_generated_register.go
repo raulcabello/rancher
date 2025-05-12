@@ -29,6 +29,7 @@ import (
 
 var (
 	APIServiceResourceName                                = "apiservices"
+	AWSCognitoProviderResourceName                        = "awscognitoproviders"
 	ActiveDirectoryProviderResourceName                   = "activedirectoryproviders"
 	AuthConfigResourceName                                = "authconfigs"
 	AuthProviderResourceName                              = "authproviders"
@@ -106,6 +107,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 	scheme.AddKnownTypes(SchemeGroupVersion,
 		&APIService{},
 		&APIServiceList{},
+		&AWSCognitoProvider{},
+		&AWSCognitoProviderList{},
 		&ActiveDirectoryProvider{},
 		&ActiveDirectoryProviderList{},
 		&AuthConfig{},
