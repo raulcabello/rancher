@@ -3,6 +3,7 @@ package data
 import (
 	"encoding/json"
 	"github.com/rancher/rancher/pkg/auth/providers/awscognito"
+	"github.com/rancher/rancher/pkg/auth/providers/cognito"
 
 	"github.com/rancher/rancher/pkg/auth/providers/activedirectory"
 	"github.com/rancher/rancher/pkg/auth/providers/azure"
@@ -81,6 +82,10 @@ func AuthConfigs(management *config.ManagementContext) error {
 	}
 
 	if err := addAuthConfig(awscognito.Name, client.AWSCognitoOIDCConfigType, false, management); err != nil {
+		return err
+	}
+
+	if err := addAuthConfig(cognito.Name, cognito.Name, false, management); err != nil {
 		return err
 	}
 

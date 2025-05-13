@@ -598,18 +598,18 @@ func authnTypes(schemas *types.Schemas) *types.Schemas {
 			schema.ResourceActions = map[string]types.Action{
 				"disable": {},
 				"configureTest": {
-					Input:  "genericOIDCConfig",
-					Output: "genericOIDCTestOutput",
+					Input:  "awsCognitoOIDCConfig",
+					Output: "awsCognitoOIDCTestOutput",
 				},
 				"testAndApply": {
-					Input: "genericOIDCApplyInput",
+					Input: "awsCognitoOIDCApplyInput",
 				},
 			}
 			schema.CollectionMethods = []string{}
 			schema.ResourceMethods = []string{http.MethodGet, http.MethodPut}
 		}).
-		MustImport(&Version, v3.GenericOIDCApplyInput{}).
-		MustImport(&Version, v3.GenericOIDCTestOutput{})
+		MustImport(&Version, v3.AWSCognitoOIDCInput{}).
+		MustImport(&Version, v3.AWSCognitoOIDCTestOutput{})
 
 }
 

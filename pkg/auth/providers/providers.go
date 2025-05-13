@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"fmt"
+	"github.com/rancher/rancher/pkg/auth/providers/cognito"
 	"strings"
 	"sync"
 
@@ -172,6 +173,14 @@ func Configure(ctx context.Context, mgmt *config.ScaledContext) {
 	Providers[awscognito.Name] = p
 	providersByType[client.AWSCognitoOIDCConfigType] = p
 	providersByType[publicclient.AWSCognitoProviderType] = p
+
+	p = cognito.Configure(ctx, mgmt, userMGR, tokenMGR)
+	ProviderNames[cognito.Name] = true
+	providersWithSecrets[cognito.Name] = true
+	UnrefreshableProviders[cognito.Name] = true
+	Providers[cognito.Name] = p
+	providersByType[cognito.Name] = p
+	//providersByType[publicclient.AWSCognitoProviderType] = p
 }
 
 func ProviderLogoutAll(apiContext *types.APIContext, token accessor.TokenAccessor) error {

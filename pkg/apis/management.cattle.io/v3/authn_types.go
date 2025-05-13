@@ -664,3 +664,15 @@ type GenericOIDCApplyInput struct {
 type AWSCognitoOIDCConfig struct {
 	OIDCConfig `json:",inline" mapstructure:",squash"`
 }
+
+// GenericOIDCTestOutput is the wrapper for the Generic OIDC provider to hold the OIDC test output object, which
+// in turn holds the RedirectURL
+type AWSCognitoOIDCTestOutput struct {
+	OIDCTestOutput `json:",inline" mapstructure:",squash"`
+}
+
+// GenericOIDCApplyInput is the wrapper for the input used to enable/activate the Generic OIDC auth provider.  It holds
+// the configuration for the OIDC provider as well as an auth code.
+type AWSCognitoOIDCInput struct {
+	OIDCApplyInput `json:",inline" mapstructure:",squash"`
+}

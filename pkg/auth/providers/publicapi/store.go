@@ -54,14 +54,13 @@ func (s *authProvidersStore) List(apiContext *types.APIContext, schema *types.Sc
 	list, _ := rrr.(*unstructured.UnstructuredList)
 	for _, i := range list.Items {
 		if t, ok := i.Object["type"].(string); ok && t != "" {
-			if enabled, ok := i.Object["enabled"].(bool); ok && enabled {
-				i.Object[".host"] = util.GetHost(apiContext.Request)
-				provider, err := providers.GetProviderByType(t).TransformToAuthProvider(i.Object)
-				if err != nil {
-					return result, err
-				}
+			//	if enabled, ok := i.Object["enabled"].(bool); ok && enabled {
+			i.Object[".host"] = util.GetHost(apiContext.Request)
+			provider, err := providers.GetProviderByType(t).TransformToAuthProvider(i.Object)
+			if err == nil {
 				result = append(result, provider)
 			}
+			//	}
 		}
 	}
 	return result, nil

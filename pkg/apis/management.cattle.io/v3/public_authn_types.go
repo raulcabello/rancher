@@ -265,3 +265,17 @@ type AWSCognitoProvider struct {
 	RedirectURL string `json:"redirectUrl"`
 	Scopes      string `json:"scopes"`
 }
+
+// +genclient
+// +kubebuilder:skipversion
+// +genclient:nonNamespaced
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+type CognitoProvider struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	AuthProvider      `json:",inline"`
+
+	RedirectURL string `json:"redirectUrl"`
+	Scopes      string `json:"scopes"`
+}

@@ -229,5 +229,16 @@ func authProvidersTypes(schemas *types.Schemas) *types.Schemas {
 			schema.CollectionMethods = []string{}
 			schema.ResourceMethods = []string{http.MethodGet}
 		}).
-		MustImport(&PublicVersion, v3.OIDCLogin{})
+		MustImport(&PublicVersion, v3.OIDCLogin{}).
+		MustImportAndCustomize(&PublicVersion, v3.CognitoProvider{}, func(schema *types.Schema) {
+			schema.BaseType = "authProvider"
+			schema.ResourceActions = map[string]types.Action{
+				"login": {
+					Input:  "oidcLogin",
+					Output: "token",
+				},
+			}
+			schema.CollectionMethods = []string{}
+			schema.ResourceMethods = []string{http.MethodGet}
+		})
 }
