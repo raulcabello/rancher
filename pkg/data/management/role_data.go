@@ -6,12 +6,12 @@ import (
 	"sync"
 
 	v3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
+	"github.com/rancher/rancher/pkg/auth/providers/local/password"
 	"github.com/rancher/rancher/pkg/features"
 	"github.com/rancher/rancher/pkg/settings"
 	"github.com/rancher/rancher/pkg/types/config"
 	"github.com/rancher/rancher/pkg/wrangler"
 	"github.com/sirupsen/logrus"
-	"golang.org/x/crypto/bcrypt"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -466,8 +466,9 @@ func BootstrapAdmin(management *wrangler.Context) (string, error) {
 			return "", fmt.Errorf("failed to retrieve bootstrap password: %w", err)
 		}
 
-		bootstrapPasswordHash, _ := bcrypt.GenerateFromPassword([]byte(bootstrapPassword), bcrypt.DefaultCost)
+		//	bootstrapPasswordHash, _ := bcrypt.GenerateFromPassword([]byte(bootstrapPassword), bcrypt.DefaultCost)
 
+		// TODO change
 		admin, err := management.Mgmt.User().Create(&v3.User{
 			ObjectMeta: v1.ObjectMeta{
 				GenerateName: "user-",
@@ -475,13 +476,17 @@ func BootstrapAdmin(management *wrangler.Context) (string, error) {
 			},
 			DisplayName:        "Default Admin",
 			Username:           "admin",
-			Password:           string(bootstrapPasswordHash),
 			MustChangePassword: bootstrapPasswordIsGenerated || bootstrapPassword == "admin",
 		})
 		if err != nil && !apierrors.IsAlreadyExists(err) {
 			return "", fmt.Errorf("can not ensure admin user exists: %w", err)
 		}
 		if err == nil {
+			pwdManager := password.NewManager(management.Core.Secret().Cache(), management.Core.Secret())
+			err = pwdManager.CreateSecret(admin.Name, bootstrapPassword)
+			if err != nil {
+				return "", fmt.Errorf("failed to create secret password: %w", err)
+			}
 			var serverURL string
 			if settings.ServerURL.Get() != "" {
 				serverURL = settings.ServerURL.Get()

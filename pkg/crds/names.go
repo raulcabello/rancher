@@ -158,8 +158,9 @@ func MCMCRDs() []string {
 		"templatecontents.management.cattle.io",
 		"templateversions.management.cattle.io",
 		"tokens.management.cattle.io",
-		"users.management.cattle.io",
 		"userattributes.management.cattle.io",
+		//	"users.management.cattle.io",
+		// TODO add users back! and remove duplicates
 	}
 }
 
@@ -253,7 +254,9 @@ var MigratedResources = map[string]bool{
 	"templateversions.management.cattle.io":                           false,
 	"tokens.management.cattle.io":                                     false,
 	"userattributes.management.cattle.io":                             false,
-	"users.management.cattle.io":                                      false,
+	"users.management.cattle.io":                                      false, //TODO check upgrades!
 	"uiplugins.catalog.cattle.io":                                     true,
 	"workloads.project.cattle.io":                                     false,
 }
+
+// TODO use map to avoid duplicates

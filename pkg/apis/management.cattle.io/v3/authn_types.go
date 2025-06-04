@@ -98,24 +98,26 @@ func (t *Token) GetCreationTime() metav1.Time {
 }
 
 // +genclient
-// +kubebuilder:skipversion
 // +genclient:nonNamespaced
+// +kubebuilder:resource:scope=Cluster
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-
+// TODO more optionals?
 type User struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	DisplayName        string     `json:"displayName,omitempty"`
-	Description        string     `json:"description"`
-	Username           string     `json:"username,omitempty"`
-	Password           string     `json:"password,omitempty" norman:"writeOnly,noupdate"`
-	MustChangePassword bool       `json:"mustChangePassword,omitempty"`
-	PrincipalIDs       []string   `json:"principalIds,omitempty" norman:"type=array[reference[principal]]"`
-	Me                 bool       `json:"me,omitempty" norman:"nocreate,noupdate"`
-	Enabled            *bool      `json:"enabled,omitempty" norman:"default=true"`
-	Spec               UserSpec   `json:"spec,omitempty"`
-	Status             UserStatus `json:"status"`
+	DisplayName string `json:"displayName,omitempty"`
+	// +optional
+	Description        string   `json:"description"`
+	Username           string   `json:"username,omitempty"`
+	Password           string   `json:"password,omitempty" norman:"writeOnly,noupdate"`
+	MustChangePassword bool     `json:"mustChangePassword,omitempty"`
+	PrincipalIDs       []string `json:"principalIds,omitempty" norman:"type=array[reference[principal]]"`
+	Me                 bool     `json:"me,omitempty" norman:"nocreate,noupdate"`
+	Enabled            *bool    `json:"enabled,omitempty" norman:"default=true"`
+	Spec               UserSpec `json:"spec,omitempty"`
+	// +optional
+	Status UserStatus `json:"status"`
 }
 
 // IsSystem returns true if the user is a system user.
@@ -135,21 +137,28 @@ func (u *User) IsDefaultAdmin() bool {
 }
 
 type UserStatus struct {
+	// +optional
 	Conditions []UserCondition `json:"conditions"`
 }
 
 type UserCondition struct {
+	// +optional
 	// Type of user condition.
 	Type string `json:"type"`
+	// +optional
 	// Status of the condition, one of True, False, Unknown.
 	Status v1.ConditionStatus `json:"status"`
+	// +optional
 	// The last time this condition was updated.
 	LastUpdateTime string `json:"lastUpdateTime,omitempty"`
+	// +optional
 	// Last time the condition transitioned from one status to another.
 	LastTransitionTime string `json:"lastTransitionTime,omitempty"`
 	// The reason for the condition's last transition.
+	// +optional
 	Reason string `json:"reason,omitempty"`
 	// Human-readable message indicating details about last transition
+	// +optional
 	Message string `json:"message,omitempty"`
 }
 

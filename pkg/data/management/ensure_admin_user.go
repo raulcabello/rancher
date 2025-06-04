@@ -1,12 +1,16 @@
 package management
 
 import (
+	"context"
 	"fmt"
+	"github.com/rancher/norman/httperror"
+	"github.com/rancher/rancher/pkg/auth/providers/local/password"
+	"github.com/rancher/rancher/pkg/wrangler"
+	wranglerv1 "github.com/rancher/wrangler/v3/pkg/generated/controllers/core/v1"
 	"os"
 
 	"github.com/docker/docker/pkg/reexec"
 	"github.com/pkg/errors"
-	"github.com/rancher/rancher/pkg/auth/api/user"
 	v3 "github.com/rancher/rancher/pkg/generated/norman/management.cattle.io/v3"
 	"github.com/urfave/cli"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -77,7 +81,12 @@ func ensureDefaultAdmin() {
 			}
 
 		} else {
-			err = createNewAdmin(client, length)
+			wranglerContext, err := wrangler.NewContext(context.TODO(), nil, conf)
+			if err != nil {
+				return err
+			}
+
+			err = createNewAdmin(client, length, wranglerContext.Core.Secret().Cache(), wranglerContext.Core.Secret())
 			if err != nil {
 				return errors.Errorf("Couldn't create a new admin. %v", err)
 			}
@@ -93,13 +102,11 @@ func ensureDefaultAdmin() {
 	}
 }
 
-func createNewAdmin(client v3.Interface, length int) error {
+func createNewAdmin(client v3.Interface, length int, secretLister wranglerv1.SecretCache, secretClient wranglerv1.SecretClient) error {
+	// TODO change!
 	pass := generatePassword(length)
-	hashedPass, err := user.HashPasswordString(string(pass))
-	if err != nil {
-		return err
-	}
 
+	// todo
 	admin, err := client.Users("").Create(&v3.User{
 		ObjectMeta: v1.ObjectMeta{
 			GenerateName: "user-",
@@ -107,12 +114,16 @@ func createNewAdmin(client v3.Interface, length int) error {
 		},
 		DisplayName:        "Default Admin",
 		Username:           "admin",
-		Password:           string(hashedPass),
 		MustChangePassword: false,
 	})
 
 	if err != nil {
 		return err
+	}
+
+	pwdManager := password.NewManager(secretLister, secretClient)
+	if err := pwdManager.CreateSecret(admin.Name, string(pass)); err != nil {
+		return httperror.NewAPIError(httperror.InvalidBodyContent, err.Error())
 	}
 
 	addAdminRoleToUser(client, *admin)

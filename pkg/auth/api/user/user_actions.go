@@ -1,6 +1,7 @@
 package user
 
 import (
+	"github.com/rancher/rancher/pkg/auth/providers/local/password"
 	"net/http"
 	"strings"
 	"unicode/utf8"
@@ -14,7 +15,7 @@ import (
 	exttokenstore "github.com/rancher/rancher/pkg/ext/stores/tokens"
 	v3 "github.com/rancher/rancher/pkg/generated/norman/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/settings"
-	"golang.org/x/crypto/bcrypt"
+	wranglerv1 "github.com/rancher/wrangler/v3/pkg/generated/controllers/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -38,6 +39,8 @@ type Handler struct {
 	GlobalRoleBindingsClient v3.GlobalRoleBindingInterface
 	UserAuthRefresher        providerrefresh.UserAuthRefresher
 	ExtTokenStore            *exttokenstore.SystemStore
+	SecretLister             wranglerv1.SecretCache
+	SecretClient             wranglerv1.SecretClient
 }
 
 func (h *Handler) Actions(actionName string, action *types.Action, apiContext *types.APIContext) error {
@@ -101,16 +104,11 @@ func (h *Handler) changePassword(request *types.APIContext) error {
 		return httperror.NewAPIError(httperror.InvalidBodyContent, err.Error())
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(currentPass)); err != nil {
-		return httperror.NewAPIError(httperror.InvalidBodyContent, "invalid current password")
+	pwdManager := password.NewManager(h.SecretLister, h.SecretClient)
+	if err := pwdManager.UpdateSecret(user.Name, currentPass, newPass); err != nil {
+		return httperror.NewAPIError(httperror.InvalidBodyContent, err.Error())
 	}
 
-	newPassHash, err := HashPasswordString(newPass)
-	if err != nil {
-		return err
-	}
-
-	user.Password = newPassHash
 	user.MustChangePassword = false
 	user, err = h.UserClient.Update(user)
 	if err != nil {
@@ -121,6 +119,7 @@ func (h *Handler) changePassword(request *types.APIContext) error {
 }
 
 func (h *Handler) setPassword(request *types.APIContext) error {
+	// TODO check this!
 	actionInput, err := parse.ReadBody(request.Request)
 	if err != nil {
 		return err
@@ -153,10 +152,15 @@ func (h *Handler) setPassword(request *types.APIContext) error {
 		return httperror.NewAPIError(httperror.InvalidBodyContent, err.Error())
 	}
 
-	userData[client.UserFieldPassword] = newPass
-	if err := hashPassword(userData); err != nil {
-		return err
+	userId, ok := userData[types.ResourceFieldID].(string)
+	if !ok {
+		return errors.New("failed to get userId")
 	}
+	hasher := password.NewManager(h.SecretLister, h.SecretClient)
+	if err := hasher.SetSecret(userId, newPass); err != nil {
+		return httperror.NewAPIError(httperror.InvalidBodyContent, err.Error())
+	}
+
 	userData[client.UserFieldMustChangePassword] = false
 	delete(userData, "me")
 

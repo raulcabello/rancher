@@ -12,9 +12,11 @@ import (
 	v32 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/auth/accessor"
 	"github.com/rancher/rancher/pkg/auth/providers/common"
+	"github.com/rancher/rancher/pkg/auth/providers/local/password"
 	"github.com/rancher/rancher/pkg/auth/tokens"
 	v3 "github.com/rancher/rancher/pkg/generated/norman/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/types/config"
+	v1 "github.com/rancher/wrangler/v3/pkg/generated/controllers/core/v1"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/text/runes"
@@ -44,6 +46,8 @@ type Provider struct {
 	gmIndexer    cache.Indexer
 	groupIndexer cache.Indexer
 	tokenMGR     *tokens.Manager
+	secretLister v1.SecretCache
+	secretClient v1.SecretClient
 }
 
 func Configure(ctx context.Context, mgmtCtx *config.ScaledContext, tokenMGR *tokens.Manager) common.AuthProvider {
@@ -66,6 +70,8 @@ func Configure(ctx context.Context, mgmtCtx *config.ScaledContext, tokenMGR *tok
 		groupIndexer: gInformer.GetIndexer(),
 		userLister:   mgmtCtx.Management.Users("").Controller().Lister(),
 		tokenMGR:     tokenMGR,
+		secretLister: mgmtCtx.Wrangler.Core.Secret().Cache(),
+		secretClient: mgmtCtx.Wrangler.Core.Secret(),
 	}
 	return l
 }
@@ -130,7 +136,8 @@ func (l *Provider) AuthenticateUser(ctx context.Context, input interface{}) (v3.
 		return v3.Principal{}, nil, "", authFailedError
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(pwd)); err != nil {
+	pwdManager := password.NewManager(l.secretLister, l.secretClient)
+	if verified, err := pwdManager.Verify(user, pwd); !verified || err != nil {
 		logrus.Debugf("Authentication failed for User [%s]: %v", username, err)
 		return v3.Principal{}, nil, "", authFailedError
 	}

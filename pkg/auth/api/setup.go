@@ -36,6 +36,8 @@ func User(ctx context.Context, schemas *types.Schemas, management *config.Scaled
 		GlobalRoleBindingsClient: management.Management.GlobalRoleBindings(""),
 		UserAuthRefresher:        providerrefresh.NewUserAuthRefresher(ctx, management),
 		ExtTokenStore:            extTokenStore,
+		SecretLister:             management.Wrangler.Core.Secret().Cache(),
+		SecretClient:             management.Wrangler.Core.Secret(),
 	}
 
 	schema.Formatter = handler.UserFormatter
