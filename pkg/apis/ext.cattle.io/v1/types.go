@@ -120,6 +120,32 @@ type TokenStatus struct {
 	LastActivitySeen *metav1.Time `json:"lastActivitySeen,omitempty"`
 }
 
+// +genclient
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+type PasswordChangeRequest struct {
+	metav1.TypeMeta `json:",inline"`
+	// Standard object metadata; More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata.
+	// +optional
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	// Spec is the desired state of the PasswordChangeRequest.
+	// +optional
+	Spec PasswordChangeRequestSpec `json:"spec,omitempty"`
+	// Status is the most recently observed status of the PasswordChangeRequest.
+	// +optional
+	Status PasswordChangeRequestStatus `json:"status,omitempty"`
+}
+
+type PasswordChangeRequestSpec struct {
+	UserID          string `json:"userID,omitempty"`
+	CurrentPassword string `json:"currentPassword,omitempty"`
+	NewPassword     string `json:"newPassword,omitempty"`
+}
+
+type PasswordChangeRequestStatus struct {
+	Conditions []metav1.Condition `json:"conditions"`
+}
+
 // Implement the TokenAccessor interface
 
 func (t *Token) GetName() string {

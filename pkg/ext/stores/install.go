@@ -2,6 +2,7 @@ package stores
 
 import (
 	"fmt"
+	"github.com/rancher/rancher/pkg/ext/stores/passwordchangerequest"
 
 	extv1 "github.com/rancher/rancher/pkg/apis/ext.cattle.io/v1"
 	"github.com/rancher/rancher/pkg/ext/stores/tokens"
@@ -30,6 +31,14 @@ func InstallStores(server *steveext.ExtensionAPIServer, wranglerContext *wrangle
 	if err != nil {
 		return fmt.Errorf("unable to install %s store: %w", tokens.SingularName, err)
 	}
+	err = server.Install(
+		passwordchangerequest.PluralName,
+		passwordchangerequest.GVK,
+		passwordchangerequest.New(wranglerContext, server.GetAuthorizer()))
+	if err != nil {
+		return fmt.Errorf("unable to install %s store: %w", passwordchangerequest.SingularName, err)
+	}
+
 	logrus.Infof("Successfully installed ext token store")
 
 	return nil

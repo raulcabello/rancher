@@ -31,6 +31,7 @@ func init() {
 }
 
 type Interface interface {
+	PasswordChangeRequest() PasswordChangeRequestController
 	Token() TokenController
 	UserActivity() UserActivityController
 }
@@ -43,6 +44,10 @@ func New(controllerFactory controller.SharedControllerFactory) Interface {
 
 type version struct {
 	controllerFactory controller.SharedControllerFactory
+}
+
+func (v *version) PasswordChangeRequest() PasswordChangeRequestController {
+	return generic.NewController[*v1.PasswordChangeRequest, *v1.PasswordChangeRequestList](schema.GroupVersionKind{Group: "ext.cattle.io", Version: "v1", Kind: "PasswordChangeRequest"}, "passwordchangerequests", true, v.controllerFactory)
 }
 
 func (v *version) Token() TokenController {

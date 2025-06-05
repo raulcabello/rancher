@@ -29,8 +29,9 @@ import (
 )
 
 var (
-	TokenResourceName        = "tokens"
-	UserActivityResourceName = "useractivities"
+	PasswordChangeRequestResourceName = "passwordchangerequests"
+	TokenResourceName                 = "tokens"
+	UserActivityResourceName          = "useractivities"
 )
 
 // SchemeGroupVersion is group version used to register these objects
@@ -54,6 +55,8 @@ var (
 // Adds the list of known types to Scheme.
 func addKnownTypes(scheme *runtime.Scheme) error {
 	scheme.AddKnownTypes(SchemeGroupVersion,
+		&PasswordChangeRequest{},
+		&PasswordChangeRequestList{},
 		&Token{},
 		&TokenList{},
 		&UserActivity{},

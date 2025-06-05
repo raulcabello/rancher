@@ -83,8 +83,6 @@ spec:
             type: object
           username:
             type: string
-        required:
-        - description
         type: object
     served: true
     storage: true
