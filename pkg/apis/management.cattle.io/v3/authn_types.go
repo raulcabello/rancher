@@ -612,7 +612,8 @@ type OIDCConfig struct {
 	// Scopes is expected to be a space delimited list of scopes
 	Scopes string `json:"scope,omitempty"`
 	// AcrValue is expected to be string containing the required ACR value
-	AcrValue string `json:"acrValue,omitempty"`
+	AcrValue             string `json:"acrValue,omitempty"`
+	OrganizationJSONPath string `json:"organizationJSONPath,omitempty"`
 }
 
 type OIDCTestOutput struct {
@@ -663,4 +664,15 @@ type GenericOIDCApplyInput struct {
 // GenericOIDCConfig is a wrapper for the AWS Cognito provider holding the OIDC Configuration
 type CognitoConfig struct {
 	OIDCConfig `json:",inline" mapstructure:",squash"`
+}
+
+// +genclient
+// +genclient:nonNamespaced
+// +kubebuilder:resource:scope=Cluster
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+type Organization struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	AuthProvider      string `json:"authProvider"`
 }

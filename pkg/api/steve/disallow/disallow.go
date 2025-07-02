@@ -21,6 +21,7 @@ var (
 		"projects":                                   true,
 		"projectroletemplatebindings":                true,
 		"oidcclients":                                true,
+		"organizations":                              true,
 	}
 	allowPost = map[string]bool{
 		"settings": true,

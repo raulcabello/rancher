@@ -16,6 +16,7 @@ import (
 	"github.com/rancher/rancher/pkg/types/config"
 	"github.com/rancher/rancher/pkg/user"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 )
 
 type GenOIDCProvider struct {
@@ -26,18 +27,21 @@ const (
 	Name      = "genericoidc"
 	UserType  = "user"
 	GroupType = "group"
+	OrgType   = "org"
 )
 
 func Configure(ctx context.Context, mgmtCtx *config.ScaledContext, userMGR user.Manager, tokenMGR *tokens.Manager) common.AuthProvider {
 	return &GenOIDCProvider{
 		baseoidc.OpenIDCProvider{
-			Name:        Name,
-			Type:        client.GenericOIDCConfigType,
-			CTX:         ctx,
-			AuthConfigs: mgmtCtx.Management.AuthConfigs(""),
-			Secrets:     mgmtCtx.Wrangler.Core.Secret(),
-			UserMGR:     userMGR,
-			TokenMGR:    tokenMGR,
+			Name:               Name,
+			Type:               client.GenericOIDCConfigType,
+			CTX:                ctx,
+			AuthConfigs:        mgmtCtx.Management.AuthConfigs(""),
+			Secrets:            mgmtCtx.Wrangler.Core.Secret(),
+			UserMGR:            userMGR,
+			TokenMGR:           tokenMGR,
+			OrganizationClient: mgmtCtx.Wrangler.Mgmt.Organization(),
+			OrganizationCache:  mgmtCtx.Wrangler.Mgmt.Organization().Cache(),
 		},
 	}
 }
@@ -74,6 +78,25 @@ func (g *GenOIDCProvider) SearchPrincipals(searchValue, principalType string, _ 
 		}
 		principals = append(principals, gp)
 	}
+
+	if principalType != UserType && principalType != GroupType {
+		orgs, err := g.OrganizationCache.List(labels.Everything())
+		if err != nil {
+			return nil, err
+		}
+		for _, org := range orgs {
+			orgName := strings.ToLower(org.Name)
+			if strings.HasPrefix(orgName, strings.ToLower(searchValue)) {
+				op := v3.Principal{
+					ObjectMeta:    metav1.ObjectMeta{Name: g.Name + "_" + OrgType + "://" + orgName},
+					DisplayName:   orgName,
+					PrincipalType: OrgType,
+					Provider:      g.Name,
+				}
+				principals = append(principals, op)
+			}
+		}
+	}
 	return principals, nil
 }
 
@@ -93,10 +116,11 @@ func (g *GenOIDCProvider) GetPrincipal(principalID string, token accessor.TokenA
 	if externalID == "" && principalType == "" {
 		return p, fmt.Errorf("invalid id %v", principalID)
 	}
-	if principalType != UserType && principalType != GroupType {
+	if principalType != UserType && principalType != GroupType && principalType != OrgType {
 		return p, fmt.Errorf("invalid principal type: %s", principalType)
 	}
-	if principalType == UserType {
+	switch principalType {
+	case UserType:
 		p = v3.Principal{
 			ObjectMeta:    metav1.ObjectMeta{Name: provider + "_" + principalType + "://" + externalID},
 			DisplayName:   externalID,
@@ -104,8 +128,16 @@ func (g *GenOIDCProvider) GetPrincipal(principalID string, token accessor.TokenA
 			PrincipalType: UserType,
 			Provider:      g.Name,
 		}
-	} else {
+	case GroupType:
 		p = g.groupToPrincipal(externalID)
+	case OrgType:
+		p = v3.Principal{
+			ObjectMeta:    metav1.ObjectMeta{Name: g.Name + "_" + OrgType + "://" + externalID},
+			DisplayName:   externalID,
+			Provider:      g.Name,
+			PrincipalType: OrgType,
+			Me:            false,
+		}
 	}
 	p = g.toPrincipalFromToken(principalType, p, token)
 	return p, nil
@@ -141,10 +173,11 @@ func (g *GenOIDCProvider) getRedirectURL(config map[string]interface{}) string {
 	authURL, _ := baseoidc.FetchAuthURL(config)
 
 	redirectURL := fmt.Sprintf(
-		"%s?client_id=%s&response_type=code&redirect_uri=%s",
+		"%s?client_id=%s&response_type=code&redirect_uri=%s&scope=%s",
 		authURL,
 		config["clientId"],
 		config["rancherUrl"],
+		config["scope"],
 	)
 
 	if config["acrValue"] != nil {

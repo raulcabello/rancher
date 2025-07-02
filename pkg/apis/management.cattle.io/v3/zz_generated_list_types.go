@@ -655,6 +655,23 @@ func NewOpenLdapProvider(namespace, name string, obj OpenLdapProvider) *OpenLdap
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
+// OrganizationList is a list of Organization resources
+type OrganizationList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata"`
+
+	Items []Organization `json:"items"`
+}
+
+func NewOrganization(namespace, name string, obj Organization) *Organization {
+	obj.APIVersion, obj.Kind = SchemeGroupVersion.WithKind("Organization").ToAPIVersionAndKind()
+	obj.Name = name
+	obj.Namespace = namespace
+	return &obj
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
 // PodSecurityAdmissionConfigurationTemplateList is a list of PodSecurityAdmissionConfigurationTemplate resources
 type PodSecurityAdmissionConfigurationTemplateList struct {
 	metav1.TypeMeta `json:",inline"`

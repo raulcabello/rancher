@@ -21,12 +21,14 @@ import (
 	"github.com/rancher/rancher/pkg/auth/tokens"
 	client "github.com/rancher/rancher/pkg/client/generated/management/v3"
 	publicclient "github.com/rancher/rancher/pkg/client/generated/management/v3public"
+	controllers "github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io/v3"
 	v3 "github.com/rancher/rancher/pkg/generated/norman/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/types/config"
 	"github.com/rancher/rancher/pkg/user"
 	wcorev1 "github.com/rancher/wrangler/v3/pkg/generated/controllers/core/v1"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/oauth2"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
@@ -35,6 +37,7 @@ const (
 	Name      = "oidc"
 	UserType  = "user"
 	GroupType = "group"
+	OrgType   = "org"
 )
 
 type tokenManager interface {
@@ -46,13 +49,15 @@ type tokenManager interface {
 }
 
 type OpenIDCProvider struct {
-	Name        string
-	Type        string
-	CTX         context.Context
-	AuthConfigs v3.AuthConfigInterface
-	Secrets     wcorev1.SecretController
-	UserMGR     user.Manager
-	TokenMGR    tokenManager
+	Name               string
+	Type               string
+	CTX                context.Context
+	AuthConfigs        v3.AuthConfigInterface
+	Secrets            wcorev1.SecretController
+	UserMGR            user.Manager
+	TokenMGR           tokenManager
+	OrganizationClient controllers.OrganizationController
+	OrganizationCache  controllers.OrganizationCache
 }
 
 type ClaimInfo struct {
@@ -65,17 +70,19 @@ type ClaimInfo struct {
 	Groups            []string `json:"groups"`
 	FullGroupPath     []string `json:"full_group_path"`
 	ACR               string   `json:"acr"`
+	Organization      string   `json:"organization"`
 }
 
 func Configure(ctx context.Context, mgmtCtx *config.ScaledContext, userMGR user.Manager, tokenMGR *tokens.Manager) common.AuthProvider {
 	return &OpenIDCProvider{
-		Name:        Name,
-		Type:        client.OIDCConfigType,
-		CTX:         ctx,
-		AuthConfigs: mgmtCtx.Management.AuthConfigs(""),
-		Secrets:     mgmtCtx.Wrangler.Core.Secret(),
-		UserMGR:     userMGR,
-		TokenMGR:    tokenMGR,
+		Name:               Name,
+		Type:               client.OIDCConfigType,
+		CTX:                ctx,
+		AuthConfigs:        mgmtCtx.Management.AuthConfigs(""),
+		Secrets:            mgmtCtx.Wrangler.Core.Secret(),
+		UserMGR:            userMGR,
+		TokenMGR:           tokenMGR,
+		OrganizationClient: mgmtCtx.Wrangler.Mgmt.Organization(),
 	}
 }
 
@@ -281,6 +288,17 @@ func (o *OpenIDCProvider) groupToPrincipal(groupName string) v3.Principal {
 	return p
 }
 
+func (o *OpenIDCProvider) orgToPrincipal(orgName string) v3.Principal {
+	p := v3.Principal{
+		ObjectMeta:    metav1.ObjectMeta{Name: o.Name + "_" + OrgType + "://" + orgName},
+		DisplayName:   orgName, //TODO add org??
+		Provider:      o.Name,
+		PrincipalType: OrgType,
+		Me:            false,
+	}
+	return p
+}
+
 func (o *OpenIDCProvider) toPrincipalFromToken(principalType string, princ v3.Principal, token accessor.TokenAccessor) v3.Principal {
 	if principalType == UserType {
 		princ.PrincipalType = UserType
@@ -410,7 +428,6 @@ func (o *OpenIDCProvider) getUserInfoFromAuthCode(ctx *context.Context, config *
 	if err != nil {
 		return userInfo, oauth2Token, fmt.Errorf("failed to verify ID token: %w", err)
 	}
-
 	if err := idToken.Claims(&claimInfo); err != nil {
 		return userInfo, oauth2Token, fmt.Errorf("failed to parse claims: %w", err)
 	}
@@ -436,6 +453,35 @@ func (o *OpenIDCProvider) getUserInfoFromAuthCode(ctx *context.Context, config *
 				groups = append(groups, group)
 			}
 			claimInfo.Groups = groups
+		}
+	}
+
+	var mapClaims map[string]interface{}
+	err = idToken.Claims(&mapClaims)
+	if err != nil {
+		return userInfo, oauth2Token, fmt.Errorf("failed to parse groups claims: %w", err)
+	}
+	orgI, ok := getNestedValue(mapClaims, "federated_claims.connector_id") // TODO config.OrganizationJSONPath)
+	if !ok {
+		logrus.Warnf("TODO skip organization")
+	} else {
+		org, ok := orgI.(string)
+		if !ok {
+			logrus.Warnf("TODO skip organization 3")
+		}
+		if org == "" {
+			logrus.Warnf("TODO empty org")
+		} else {
+			// TODO check with cache if it does not exist
+			_, err := o.OrganizationClient.Create(&v32.Organization{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: org,
+				},
+			})
+			if err != nil && !apierrors.IsAlreadyExists(err) {
+				return nil, nil, err
+			}
+			claimInfo.Organization = org
 		}
 	}
 
@@ -578,6 +624,11 @@ func (o *OpenIDCProvider) getGroupsFromClaimInfo(claimInfo ClaimInfo) []v3.Princ
 			groupPrincipals = append(groupPrincipals, groupPrincipal)
 		}
 	}
+	if claimInfo.Organization != "" {
+		groupPrincipal := o.orgToPrincipal(claimInfo.Organization)
+		groupPrincipal.MemberOf = true
+		groupPrincipals = append(groupPrincipals, groupPrincipal)
+	}
 	return groupPrincipals
 }
 
@@ -666,4 +717,24 @@ func parseACRFromAccessToken(accessToken string) (string, error) {
 		return "", fmt.Errorf("ACR claim invalid or not found in token: (acr=%v)", claims["acr"])
 	}
 	return acrValue, nil
+}
+
+// getNestedValue extracts a value from nested JSON using dot-separated path
+func getNestedValue(data interface{}, path string) (interface{}, bool) {
+	parts := strings.Split(path, ".")
+
+	var current = data
+	for _, part := range parts {
+		m, ok := current.(map[string]interface{})
+		if !ok {
+			return nil, false
+		}
+
+		current, ok = m[part]
+		if !ok {
+			return nil, false
+		}
+	}
+
+	return current, true
 }

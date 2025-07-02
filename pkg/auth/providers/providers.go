@@ -238,7 +238,7 @@ func SearchPrincipals(name, principalType string, myToken accessor.TokenAccessor
 		return principals, err
 	}
 	if ap != LocalProvider {
-		lp := Providers[LocalProvider]
+		lp := Providers[LocalProvider] // TODO filter local users by org!
 		if lpDedupe, _ := lp.(*local.Provider); lpDedupe != nil {
 			localPrincipals, err := lpDedupe.SearchPrincipalsDedupe(name, principalType, myToken, principals)
 			if err != nil {
