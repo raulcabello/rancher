@@ -461,16 +461,13 @@ func (o *OpenIDCProvider) getUserInfoFromAuthCode(ctx *context.Context, config *
 	if err != nil {
 		return userInfo, oauth2Token, fmt.Errorf("failed to parse groups claims: %w", err)
 	}
-	orgI, ok := getNestedValue(mapClaims, "federated_claims.connector_id") // TODO config.OrganizationJSONPath)
-	if !ok {
-		logrus.Warnf("TODO skip organization")
-	} else {
-		org, ok := orgI.(string)
+	if config.OrganizationJSONPath != "" {
+		org, ok := getNestedValue(mapClaims, config.OrganizationJSONPath)
 		if !ok {
-			logrus.Warnf("TODO skip organization 3")
+			return userInfo, oauth2Token, fmt.Errorf("failed to parse org")
 		}
 		if org == "" {
-			logrus.Warnf("TODO empty org")
+			return userInfo, oauth2Token, fmt.Errorf("org is empty")
 		} else {
 			// TODO check with cache if it does not exist
 			_, err := o.OrganizationClient.Create(&v32.Organization{
@@ -720,21 +717,24 @@ func parseACRFromAccessToken(accessToken string) (string, error) {
 }
 
 // getNestedValue extracts a value from nested JSON using dot-separated path
-func getNestedValue(data interface{}, path string) (interface{}, bool) {
+func getNestedValue(data interface{}, path string) (string, bool) {
 	parts := strings.Split(path, ".")
 
 	var current = data
 	for _, part := range parts {
 		m, ok := current.(map[string]interface{})
 		if !ok {
-			return nil, false
+			return "", false
 		}
-
 		current, ok = m[part]
 		if !ok {
-			return nil, false
+			return "", false
 		}
 	}
+	currentStr, ok := current.(string)
+	if !ok {
+		return "", false
+	}
 
-	return current, true
+	return currentStr, true
 }

@@ -3,6 +3,9 @@ package local
 import (
 	"context"
 	"fmt"
+	"github.com/rancher/rancher/pkg/auth/providers/genericoidc"
+	authV1 "k8s.io/api/authorization/v1"
+	v1 "k8s.io/client-go/kubernetes/typed/authorization/v1"
 	"strings"
 	"unicode"
 
@@ -38,12 +41,14 @@ const (
 var invalidHash, _ = bcrypt.GenerateFromPassword([]byte("invalid"), bcrypt.DefaultCost)
 
 type Provider struct {
-	userLister   v3.UserLister
-	groupLister  v3.GroupLister
-	userIndexer  cache.Indexer
-	gmIndexer    cache.Indexer
-	groupIndexer cache.Indexer
-	tokenMGR     *tokens.Manager
+	userLister          v3.UserLister
+	userAttributeLister v3.UserAttributeLister
+	groupLister         v3.GroupLister
+	userIndexer         cache.Indexer
+	gmIndexer           cache.Indexer
+	groupIndexer        cache.Indexer
+	tokenMGR            *tokens.Manager
+	sar                 v1.AuthorizationV1Interface
 }
 
 func Configure(ctx context.Context, mgmtCtx *config.ScaledContext, tokenMGR *tokens.Manager) common.AuthProvider {
@@ -60,12 +65,14 @@ func Configure(ctx context.Context, mgmtCtx *config.ScaledContext, tokenMGR *tok
 	gInformer.AddIndexers(gIndexers)
 
 	l := &Provider{
-		userIndexer:  informer.GetIndexer(),
-		gmIndexer:    gmInformer.GetIndexer(),
-		groupLister:  mgmtCtx.Management.Groups("").Controller().Lister(),
-		groupIndexer: gInformer.GetIndexer(),
-		userLister:   mgmtCtx.Management.Users("").Controller().Lister(),
-		tokenMGR:     tokenMGR,
+		userIndexer:         informer.GetIndexer(),
+		gmIndexer:           gmInformer.GetIndexer(),
+		groupLister:         mgmtCtx.Management.Groups("").Controller().Lister(),
+		groupIndexer:        gInformer.GetIndexer(),
+		userLister:          mgmtCtx.Management.Users("").Controller().Lister(),
+		userAttributeLister: mgmtCtx.Management.UserAttributes("").Controller().Lister(),
+		sar:                 mgmtCtx.K8sClient.AuthorizationV1(),
+		tokenMGR:            tokenMGR,
 	}
 	return l
 }
@@ -236,6 +243,28 @@ func (l *Provider) SearchPrincipalsDedupe(searchKey, principalType string, token
 			for _, p := range user.PrincipalIDs {
 				if fromOtherProviders[p] {
 					continue User
+				}
+			}
+			// TODO check if org is enabled!
+			// TODO keycloak!
+			if token.GetAuthProvider() == genericoidc.Name {
+				hasPermissionToSeeOrs, err := l.canUserGetOrganizations(token.GetUserID())
+				if err != nil {
+					return principals, fmt.Errorf("failed to check org permissions: %w", err)
+				}
+				if !hasPermissionToSeeOrs {
+					orgUserMakingRequest, err := l.getOrgForUser(token.GetUserID(), token.GetAuthProvider())
+					if err != nil {
+						return principals, fmt.Errorf("failed to get user attributes: %w", err)
+					}
+					orgLocalUser, err := l.getOrgForUser(user.Name, token.GetAuthProvider())
+					if err != nil {
+						return principals, fmt.Errorf("failed to get user attributes: %w", err)
+					}
+					// TODO check admin or permisions to list orgs?
+					if orgUserMakingRequest != orgLocalUser {
+						continue User
+					}
 				}
 			}
 			principalID := getLocalPrincipalID(user)
@@ -513,4 +542,38 @@ func simplifyString(s string) string {
 	}
 
 	return result
+}
+
+func (l *Provider) canUserGetOrganizations(user string) (bool, error) {
+	review := authV1.SubjectAccessReview{
+		Spec: authV1.SubjectAccessReviewSpec{
+			User: user,
+			ResourceAttributes: &authV1.ResourceAttributes{
+				Verb:     "get",
+				Resource: "organizations",
+				Group:    "management.cattle.io",
+			},
+		},
+	}
+
+	result, err := l.sar.SubjectAccessReviews().Create(context.Background(), &review, metav1.CreateOptions{})
+	if err != nil {
+		return false, err
+	}
+	logrus.Debugf("Impersonate check result: %v", result)
+	return result.Status.Allowed, nil
+}
+
+func (l *Provider) getOrgForUser(userID string, provider string) (string, error) {
+	attribs, err := l.userAttributeLister.Get("", userID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get user attributes: %w", err)
+	}
+	for _, gp := range attribs.GroupPrincipals[provider].Items {
+		if gp.PrincipalType == "org" { //TODO
+			return gp.DisplayName, nil
+		}
+	}
+
+	return "", nil
 }

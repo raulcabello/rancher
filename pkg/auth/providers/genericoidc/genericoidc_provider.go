@@ -3,6 +3,8 @@ package genericoidc
 import (
 	"context"
 	"fmt"
+	authV1 "k8s.io/api/authorization/v1"
+	v1 "k8s.io/client-go/kubernetes/typed/authorization/v1"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -21,6 +23,7 @@ import (
 
 type GenOIDCProvider struct {
 	baseoidc.OpenIDCProvider
+	sar v1.AuthorizationV1Interface
 }
 
 const (
@@ -32,7 +35,7 @@ const (
 
 func Configure(ctx context.Context, mgmtCtx *config.ScaledContext, userMGR user.Manager, tokenMGR *tokens.Manager) common.AuthProvider {
 	return &GenOIDCProvider{
-		baseoidc.OpenIDCProvider{
+		OpenIDCProvider: baseoidc.OpenIDCProvider{
 			Name:               Name,
 			Type:               client.GenericOIDCConfigType,
 			CTX:                ctx,
@@ -43,6 +46,7 @@ func Configure(ctx context.Context, mgmtCtx *config.ScaledContext, userMGR user.
 			OrganizationClient: mgmtCtx.Wrangler.Mgmt.Organization(),
 			OrganizationCache:  mgmtCtx.Wrangler.Mgmt.Organization().Cache(),
 		},
+		sar: mgmtCtx.K8sClient.AuthorizationV1(),
 	}
 }
 
@@ -55,7 +59,7 @@ func (g *GenOIDCProvider) GetName() string {
 // that matches the searchValue.  If principalType is empty, both a user principal and a group principal will
 // be returned.  This is done because OIDC does not have a proper lookup mechanism.  In order
 // to provide some degree of functionality that allows manual entry for users/groups, this is the compromise.
-func (g *GenOIDCProvider) SearchPrincipals(searchValue, principalType string, _ accessor.TokenAccessor) ([]v3.Principal, error) {
+func (g *GenOIDCProvider) SearchPrincipals(searchValue, principalType string, token accessor.TokenAccessor) ([]v3.Principal, error) {
 	var principals []v3.Principal
 
 	if principalType != GroupType {
@@ -80,20 +84,26 @@ func (g *GenOIDCProvider) SearchPrincipals(searchValue, principalType string, _ 
 	}
 
 	if principalType != UserType && principalType != GroupType {
-		orgs, err := g.OrganizationCache.List(labels.Everything())
+		canUserGetOrgs, err := g.canUserGetOrganizations(token.GetUserID())
 		if err != nil {
-			return nil, err
+			return principals, fmt.Errorf("failed to check org permissions: %w", err)
 		}
-		for _, org := range orgs {
-			orgName := strings.ToLower(org.Name)
-			if strings.HasPrefix(orgName, strings.ToLower(searchValue)) {
-				op := v3.Principal{
-					ObjectMeta:    metav1.ObjectMeta{Name: g.Name + "_" + OrgType + "://" + orgName},
-					DisplayName:   orgName,
-					PrincipalType: OrgType,
-					Provider:      g.Name,
+		if canUserGetOrgs {
+			orgs, err := g.OrganizationCache.List(labels.Everything())
+			if err != nil {
+				return nil, err
+			}
+			for _, org := range orgs {
+				orgName := strings.ToLower(org.Name)
+				if strings.HasPrefix(orgName, strings.ToLower(searchValue)) {
+					op := v3.Principal{
+						ObjectMeta:    metav1.ObjectMeta{Name: g.Name + "_" + OrgType + "://" + orgName},
+						DisplayName:   orgName,
+						PrincipalType: OrgType,
+						Provider:      g.Name,
+					}
+					principals = append(principals, op)
 				}
-				principals = append(principals, op)
 			}
 		}
 	}
@@ -207,4 +217,23 @@ func (g *GenOIDCProvider) toPrincipalFromToken(principalType string, princ v3.Pr
 		}
 	}
 	return princ
+}
+
+func (g *GenOIDCProvider) canUserGetOrganizations(user string) (bool, error) {
+	review := authV1.SubjectAccessReview{
+		Spec: authV1.SubjectAccessReviewSpec{
+			User: user,
+			ResourceAttributes: &authV1.ResourceAttributes{
+				Verb:     "get",
+				Resource: "organizations",
+				Group:    "management.cattle.io",
+			},
+		},
+	}
+
+	result, err := g.sar.SubjectAccessReviews().Create(context.Background(), &review, metav1.CreateOptions{})
+	if err != nil {
+		return false, err
+	}
+	return result.Status.Allowed, nil
 }
