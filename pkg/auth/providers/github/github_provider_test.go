@@ -107,7 +107,7 @@ func TestSearchPrincipals(t *testing.T) {
 			"login": "devorg",
 			"avatar_url": "` + srvURL.Host + `/u/9343010/avatar",
 			"html_url": "` + srvURL.Host + `/devorg",
-			"type": "Organization"
+			"type": "Org"
 		}]
 	}`)
 	searchUsersGroup = []byte(`{
@@ -118,7 +118,7 @@ func TestSearchPrincipals(t *testing.T) {
 			"login": "devorg",
 			"avatar_url": "` + srvURL.Host + `/u/9343010/avatar",
 			"html_url": "` + srvURL.Host + `/devorg",
-			"type": "Organization"
+			"type": "Org"
 		}]
 	}`)
 	searchUsersUser = []byte(`{
@@ -295,7 +295,7 @@ func TestSearchPrincipalsExt(t *testing.T) {
 			"login": "devorg",
 			"avatar_url": "` + srvURL.Host + `/u/9343010/avatar",
 			"html_url": "` + srvURL.Host + `/devorg",
-			"type": "Organization"
+			"type": "Org"
 		}]
 	}`)
 	searchUsersGroup = []byte(`{
@@ -306,7 +306,7 @@ func TestSearchPrincipalsExt(t *testing.T) {
 			"login": "devorg",
 			"avatar_url": "` + srvURL.Host + `/u/9343010/avatar",
 			"html_url": "` + srvURL.Host + `/devorg",
-			"type": "Organization"
+			"type": "Org"
 		}]
 	}`)
 	searchUsersUser = []byte(`{

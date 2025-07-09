@@ -70,7 +70,7 @@ type ClaimInfo struct {
 	Groups            []string `json:"groups"`
 	FullGroupPath     []string `json:"full_group_path"`
 	ACR               string   `json:"acr"`
-	Organization      string   `json:"organization"`
+	Org               string   `json:"org"`
 }
 
 func Configure(ctx context.Context, mgmtCtx *config.ScaledContext, userMGR user.Manager, tokenMGR *tokens.Manager) common.AuthProvider {
@@ -478,7 +478,7 @@ func (o *OpenIDCProvider) getUserInfoFromAuthCode(ctx *context.Context, config *
 			if err != nil && !apierrors.IsAlreadyExists(err) {
 				return nil, nil, err
 			}
-			claimInfo.Organization = org
+			claimInfo.Org = org
 		}
 	}
 
@@ -621,8 +621,8 @@ func (o *OpenIDCProvider) getGroupsFromClaimInfo(claimInfo ClaimInfo) []v3.Princ
 			groupPrincipals = append(groupPrincipals, groupPrincipal)
 		}
 	}
-	if claimInfo.Organization != "" {
-		groupPrincipal := o.orgToPrincipal(claimInfo.Organization)
+	if claimInfo.Org != "" {
+		groupPrincipal := o.orgToPrincipal(claimInfo.Org)
 		groupPrincipal.MemberOf = true
 		groupPrincipals = append(groupPrincipals, groupPrincipal)
 	}
@@ -733,7 +733,14 @@ func getNestedValue(data interface{}, path string) (string, bool) {
 	}
 	currentStr, ok := current.(string)
 	if !ok {
-		return "", false
+		currentMap, ok := current.(map[string]interface{})
+		if !ok {
+			return "", false
+		}
+		for key := range currentMap {
+			// TODO warn or error if more than one found?
+			return key, true
+		}
 	}
 
 	return currentStr, true

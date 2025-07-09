@@ -273,11 +273,11 @@ RUN mkdir -p /usr/share/rancher/ui && \
     mkdir -p /usr/share/rancher/ui/api-ui && \
     cd /usr/share/rancher/ui/api-ui && \
     curl -sL https://releases.rancher.com/api-ui/${CATTLE_API_UI_VERSION}.tar.gz | tar xvzf - --strip-components=1 && \
-    mkdir -p /usr/share/rancher/ui-dashboard/dashboard && \
-    cd /usr/share/rancher/ui-dashboard/dashboard && \
-    curl -sL https://releases.rancher.com/dashboard/${CATTLE_DASHBOARD_UI_VERSION}.tar.gz | tar xvzf - --strip-components=2 && \
-    ln -s dashboard/index.html ../index.html && \
-    cd ../../ui/assets && \
+    mkdir -p /usr/share/rancher/ui-dashboard && \
+    cd /usr/share/rancher/ui-dashboard && \
+  #  curl -sL https://releases.rancher.com/dashboard/${CATTLE_DASHBOARD_UI_VERSION}.tar.gz | tar xvzf - --strip-components=2 && \
+  #  ln -s dashboard/index.html ../index.html && \
+    cd ../ui/assets && \
     curl -sfL ${CATTLE_SYSTEM_AGENT_DOWNLOAD_PREFIX}/${CATTLE_SYSTEM_AGENT_VERSION}/rancher-system-agent-arm64 -O && \
     curl -sfL ${CATTLE_SYSTEM_AGENT_DOWNLOAD_PREFIX}/${CATTLE_SYSTEM_AGENT_VERSION}/rancher-system-agent-amd64 -O && \
     curl -sfL ${CATTLE_SYSTEM_AGENT_INSTALL_SCRIPT} -o system-agent-install.sh && \
@@ -286,6 +286,8 @@ RUN mkdir -p /usr/share/rancher/ui && \
     curl -sfL https://acs-mirror.azureedge.net/csi-proxy/${CATTLE_CSI_PROXY_AGENT_VERSION}/binaries/csi-proxy-${CATTLE_CSI_PROXY_AGENT_VERSION}.tar.gz -O && \
     curl -sfL ${CATTLE_WINS_AGENT_INSTALL_SCRIPT} -o wins-agent-install.ps1 \
     curl -sfL ${CATTLE_WINS_AGENT_UNINSTALL_SCRIPT} -o wins-agent-uninstall.ps1
+
+COPY /uidist /usr/share/rancher/ui-dashboard
 
 ENV CATTLE_CLI_URL_DARWIN  https://releases.rancher.com/cli2/${CATTLE_CLI_VERSION}/rancher-darwin-amd64-${CATTLE_CLI_VERSION}.tar.gz
 ENV CATTLE_CLI_URL_LINUX   https://releases.rancher.com/cli2/${CATTLE_CLI_VERSION}/rancher-linux-amd64-${CATTLE_CLI_VERSION}.tar.gz
@@ -308,8 +310,8 @@ RUN zypper -n install libbtrfs-devel libgpgme-devel
 COPY hack/airgap/go.mod hack/airgap/go.sum /src/
 RUN --mount=type=cache,target=/root/.cache,id=rancher go mod download
 COPY hack/airgap/ /src/
-RUN --mount=type=cache,target=/root/.cache,id=rancher go build -tags k3s_export -o export-images ./...
-RUN ./export-images -k3s-version ${CATTLE_K3S_VERSION} -output /src/k3s-airgap-images.tar
+#RUN --mount=type=cache,target=/root/.cache,id=rancher go build -tags k3s_export -o export-images ./...
+#RUN ./export-images -k3s-version ${CATTLE_K3S_VERSION} -output /src/k3s-airgap-images.tar
 
 
 # rancher-go-builder is an intermediate stage with go mod ready and Rancher
@@ -367,8 +369,8 @@ ENV CATTLE_SERVER_IMAGE ${IMAGE_REPO}/${IMAGE_NAME}
 
 COPY --chown=root:root --chmod=0755 \
     --from=server-build /app/rancher /usr/bin/
-COPY --chown=root:root --chmod=0755 \
-    --from=images /src/k3s-airgap-images.tar /var/lib/rancher/k3s/agent/images/
+#COPY --chown=root:root --chmod=0755 \
+#    --from=images /src/k3s-airgap-images.tar /var/lib/rancher/k3s/agent/images/
 COPY --chown=root:root --chmod=0755 \
     package/loglevel \
     package/entrypoint.sh \

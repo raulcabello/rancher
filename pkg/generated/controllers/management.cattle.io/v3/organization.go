@@ -23,17 +23,17 @@ import (
 	"github.com/rancher/wrangler/v3/pkg/generic"
 )
 
-// OrganizationController interface for managing Organization resources.
+// OrganizationController interface for managing Org resources.
 type OrganizationController interface {
 	generic.NonNamespacedControllerInterface[*v3.Organization, *v3.OrganizationList]
 }
 
-// OrganizationClient interface for managing Organization resources in Kubernetes.
+// OrganizationClient interface for managing Org resources in Kubernetes.
 type OrganizationClient interface {
 	generic.NonNamespacedClientInterface[*v3.Organization, *v3.OrganizationList]
 }
 
-// OrganizationCache interface for retrieving Organization resources in memory.
+// OrganizationCache interface for retrieving Org resources in memory.
 type OrganizationCache interface {
 	generic.NonNamespacedCacheInterface[*v3.Organization]
 }

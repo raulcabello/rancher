@@ -3,6 +3,10 @@ package keycloakoidc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	authV1 "k8s.io/api/authorization/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	v1 "k8s.io/client-go/kubernetes/typed/authorization/v1"
 	"reflect"
 	"strings"
 
@@ -31,19 +35,24 @@ const (
 
 type keyCloakOIDCProvider struct {
 	oidc.OpenIDCProvider
+	sar                 v1.AuthorizationV1Interface
+	userAttributeLister v3.UserAttributeLister
 }
 
 func Configure(ctx context.Context, mgmtCtx *config.ScaledContext, userMGR user.Manager, tokenMGR *tokens.Manager) common.AuthProvider {
 	return &keyCloakOIDCProvider{
-		oidc.OpenIDCProvider{
-			Name:        Name,
-			Type:        client.KeyCloakOIDCConfigType,
-			CTX:         ctx,
-			AuthConfigs: mgmtCtx.Management.AuthConfigs(""),
-			Secrets:     mgmtCtx.Wrangler.Core.Secret(),
-			UserMGR:     userMGR,
-			TokenMGR:    tokenMGR,
+		OpenIDCProvider: oidc.OpenIDCProvider{
+			Name:               Name,
+			Type:               client.KeyCloakOIDCConfigType,
+			CTX:                ctx,
+			AuthConfigs:        mgmtCtx.Management.AuthConfigs(""),
+			Secrets:            mgmtCtx.Wrangler.Core.Secret(),
+			UserMGR:            userMGR,
+			TokenMGR:           tokenMGR,
+			OrganizationClient: mgmtCtx.Wrangler.Mgmt.Organization(),
 		},
+		sar:                 mgmtCtx.K8sClient.AuthorizationV1(),
+		userAttributeLister: mgmtCtx.Management.UserAttributes("").Controller().Lister(),
 	}
 }
 
@@ -87,15 +96,55 @@ func (k *keyCloakOIDCProvider) SearchPrincipals(searchValue, principalType strin
 		logrus.Errorf("[keycloak oidc] SsearchPrincipals: error creating new http client: %v", err)
 		return principals, err
 	}
-	accts, err := keyCloakClient.searchPrincipals(searchValue, principalType, config)
+
+	if config.OrganizationJSONPath != "" {
+		userAttributes, err := k.userAttributeLister.Get("", token.GetUserID())
+		if err != nil {
+			return nil, err
+		}
+		var org string // TODO support multiple orgs?
+		for _, gp := range userAttributes.GroupPrincipals["keycloakoidc"].Items {
+			if gp.PrincipalType == "org" {
+				org = gp.DisplayName
+			}
+		}
+		accts, err := keyCloakClient.searchPrincipalsInOrg(searchValue, org, config)
+	} else {
+		// TODO what if config.OrganizationJSONPath != "" but user does not have an org?
+		accts, err := keyCloakClient.searchPrincipals(searchValue, principalType, config)
+		if err != nil {
+			logrus.Errorf("[keycloak oidc] SearchPrincipals: problem searching keycloak: %v", err)
+			return principals, err
+		}
+		for _, acct := range accts {
+			p := k.toPrincipal(acct.Type, acct, token)
+			principals = append(principals, p)
+		}
+	}
+
+	canUserGetOrgs, err := k.canUserGetOrganizations(token.GetUserID())
 	if err != nil {
-		logrus.Errorf("[keycloak oidc] SearchPrincipals: problem searching keycloak: %v", err)
-		return principals, err
+		return principals, fmt.Errorf("failed to check org permissions: %w", err)
 	}
-	for _, acct := range accts {
-		p := k.toPrincipal(acct.Type, acct, token)
-		principals = append(principals, p)
+	if canUserGetOrgs {
+		orgs, err := k.OrganizationCache.List(labels.Everything())
+		if err != nil {
+			return nil, err
+		}
+		for _, org := range orgs {
+			orgName := strings.ToLower(org.Name)
+			if strings.HasPrefix(orgName, strings.ToLower(searchValue)) {
+				op := v3.Principal{
+					ObjectMeta:    metav1.ObjectMeta{Name: k.Name + "_" + "org" + "://" + orgName},
+					DisplayName:   orgName,
+					PrincipalType: "org",
+					Provider:      k.Name,
+				}
+				principals = append(principals, op)
+			}
+		}
 	}
+
 	return principals, nil
 }
 
@@ -183,4 +232,24 @@ func (k *keyCloakOIDCProvider) getRefreshAndUpdateToken(ctx context.Context, oau
 		k.UpdateToken(reusedToken, token.GetUserID())
 	}
 	return reusedToken, nil
+}
+
+// TODO reuse
+func (k *keyCloakOIDCProvider) canUserGetOrganizations(user string) (bool, error) {
+	review := authV1.SubjectAccessReview{
+		Spec: authV1.SubjectAccessReviewSpec{
+			User: user,
+			ResourceAttributes: &authV1.ResourceAttributes{
+				Verb:     "get",
+				Resource: "organizations",
+				Group:    "management.cattle.io",
+			},
+		},
+	}
+
+	result, err := k.sar.SubjectAccessReviews().Create(context.Background(), &review, metav1.CreateOptions{})
+	if err != nil {
+		return false, err
+	}
+	return result.Status.Allowed, nil
 }
