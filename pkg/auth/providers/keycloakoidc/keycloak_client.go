@@ -215,36 +215,35 @@ func (k *KeyCloakClient) getFromKeyCloak(url string) ([]byte, error) {
 	return b, nil
 }
 
-func (k *KeyCloakClient) searchPrincipalsInOrg(searchTerm, principalType string, config *v32.OIDCConfig) ([]account, error) {
+func (k *KeyCloakClient) searchPrincipalsInOrg(searchTerm, org string, config *v32.OIDCConfig) ([]account, error) {
 	var accounts []account
 	sURL, err := getSearchURL(config.Issuer)
 	if err != nil {
 		return accounts, err
 	}
-	if principalType == "" || principalType == UserType {
-		var userAccounts []account
-		searchURL := fmt.Sprintf("%s/%ss?search=%s", sURL, UserType, searchTerm) change
-		search := URLEncoded(searchURL)
+	var userAccounts []account
+	searchURL := fmt.Sprintf("%s/organizations/%s/members?search=%s", sURL, org, searchTerm)
+	search := URLEncoded(searchURL)
 
-		b, err := k.getFromKeyCloak(search)
-		if err != nil {
-			logrus.Errorf("[keycloak oidc] searchPrincipals: GET request failed. url: %s, err: %s", search, err)
-			return accounts, err
-		}
-		if err := json.Unmarshal(b, &userAccounts); err != nil {
-			logrus.Errorf("[keycloak oidc] searchPrincipals: received error unmarshalling search results, err: %v", err)
-			return accounts, err
-		}
-		for _, u := range userAccounts {
-			u.Type = UserType
-			accounts = append(accounts, u)
-		}
+	b, err := k.getFromKeyCloak(search)
+	if err != nil {
+		logrus.Errorf("[keycloak oidc] searchPrincipals: GET request failed. url: %s, err: %s", search, err)
+		return accounts, err
 	}
+	if err := json.Unmarshal(b, &userAccounts); err != nil {
+		logrus.Errorf("[keycloak oidc] searchPrincipals: received error unmarshalling search results, err: %v", err)
+		return accounts, err
+	}
+	for _, u := range userAccounts {
+		u.Type = UserType
+		accounts = append(accounts, u)
+	}
+
 	//checking the GroupSearchEnabled flag to ensure group principals are not returned if group mappers
 	//are not enabled. If group mappers are not enabled, it doesn't make sense to return groups as
 	//principals that could be authorized.
-	if (principalType == "" || principalType == GroupType) && *config.GroupSearchEnabled == true {
-		groupAccounts, err := k.groupSearch(searchTerm, sURL)
+	if *config.GroupSearchEnabled == true {
+		groupAccounts, err := k.groupSearch(searchTerm, sURL) //TODO add org filter!
 		if err != nil {
 			return accounts, err
 		}

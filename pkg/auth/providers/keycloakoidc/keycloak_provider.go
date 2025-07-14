@@ -50,6 +50,7 @@ func Configure(ctx context.Context, mgmtCtx *config.ScaledContext, userMGR user.
 			UserMGR:            userMGR,
 			TokenMGR:           tokenMGR,
 			OrganizationClient: mgmtCtx.Wrangler.Mgmt.Organization(),
+			OrganizationCache:  mgmtCtx.Wrangler.Mgmt.Organization().Cache(),
 		},
 		sar:                 mgmtCtx.K8sClient.AuthorizationV1(),
 		userAttributeLister: mgmtCtx.Management.UserAttributes("").Controller().Lister(),
@@ -97,20 +98,18 @@ func (k *keyCloakOIDCProvider) SearchPrincipals(searchValue, principalType strin
 		return principals, err
 	}
 
-	if config.OrganizationJSONPath != "" {
-		userAttributes, err := k.userAttributeLister.Get("", token.GetUserID())
+	shouldSearchInOrg, org := k.shouldSearchInOrg(config, token.GetUserID())
+	if shouldSearchInOrg {
+		accts, err := keyCloakClient.searchPrincipalsInOrg(searchValue, org.ID, config)
 		if err != nil {
-			return nil, err
+			logrus.Errorf("[keycloak oidc] SearchPrincipals: problem searching keycloak: %v", err)
+			return principals, err
 		}
-		var org string // TODO support multiple orgs?
-		for _, gp := range userAttributes.GroupPrincipals["keycloakoidc"].Items {
-			if gp.PrincipalType == "org" {
-				org = gp.DisplayName
-			}
+		for _, acct := range accts {
+			p := k.toPrincipal(acct.Type, acct, token)
+			principals = append(principals, p)
 		}
-		accts, err := keyCloakClient.searchPrincipalsInOrg(searchValue, org, config)
 	} else {
-		// TODO what if config.OrganizationJSONPath != "" but user does not have an org?
 		accts, err := keyCloakClient.searchPrincipals(searchValue, principalType, config)
 		if err != nil {
 			logrus.Errorf("[keycloak oidc] SearchPrincipals: problem searching keycloak: %v", err)
@@ -127,11 +126,11 @@ func (k *keyCloakOIDCProvider) SearchPrincipals(searchValue, principalType strin
 		return principals, fmt.Errorf("failed to check org permissions: %w", err)
 	}
 	if canUserGetOrgs {
-		orgs, err := k.OrganizationCache.List(labels.Everything())
+		orgs, err := k.OrganizationClient.List(metav1.ListOptions{LabelSelector: labels.Everything().String()}) //TODO use cache
 		if err != nil {
 			return nil, err
 		}
-		for _, org := range orgs {
+		for _, org := range orgs.Items {
 			orgName := strings.ToLower(org.Name)
 			if strings.HasPrefix(orgName, strings.ToLower(searchValue)) {
 				op := v3.Principal{
@@ -146,6 +145,30 @@ func (k *keyCloakOIDCProvider) SearchPrincipals(searchValue, principalType strin
 	}
 
 	return principals, nil
+}
+
+func (k *keyCloakOIDCProvider) shouldSearchInOrg(config *v32.OIDCConfig, userID string) (bool, *v32.Organization) {
+	if config.OrganizationJSONPath != "" {
+		userAttributes, err := k.userAttributeLister.Get("", userID)
+		if err != nil {
+			logrus.Errorf("[keycloak oidc] SearchPrincipals: problem getting userattributes : %v", err)
+			return false, nil //TODO handle err
+		}
+		var org string // TODO support multiple orgs?
+		for _, gp := range userAttributes.GroupPrincipals["keycloakoidc"].Items {
+			if gp.PrincipalType == "org" {
+				org = gp.DisplayName
+			}
+		}
+		o, err := k.OrganizationCache.Get(org)
+		if err != nil {
+			logrus.Errorf("[keycloak oidc] SearchPrincipals: problem getting org: %v", err)
+			return false, nil
+		}
+		return true, o
+	}
+
+	return false, nil
 }
 
 func (k *keyCloakOIDCProvider) toPrincipal(principalType string, acct account, token accessor.TokenAccessor) v3.Principal {

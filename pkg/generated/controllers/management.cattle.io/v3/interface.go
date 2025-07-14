@@ -247,7 +247,7 @@ func (v *version) OpenLdapProvider() OpenLdapProviderController {
 }
 
 func (v *version) Organization() OrganizationController {
-	return generic.NewNonNamespacedController[*v3.Organization, *v3.OrganizationList](schema.GroupVersionKind{Group: "management.cattle.io", Version: "v3", Kind: "Org"}, "organizations", v.controllerFactory)
+	return generic.NewNonNamespacedController[*v3.Organization, *v3.OrganizationList](schema.GroupVersionKind{Group: "management.cattle.io", Version: "v3", Kind: "Organization"}, "organizations", v.controllerFactory)
 }
 
 func (v *version) PodSecurityAdmissionConfigurationTemplate() PodSecurityAdmissionConfigurationTemplateController {

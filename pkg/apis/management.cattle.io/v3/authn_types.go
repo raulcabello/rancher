@@ -674,5 +674,5 @@ type CognitoConfig struct {
 type Organization struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	AuthProvider      string `json:"authProvider"`
+	ID                string `json:"id"`
 }

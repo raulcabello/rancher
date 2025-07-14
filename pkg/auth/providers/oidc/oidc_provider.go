@@ -83,6 +83,7 @@ func Configure(ctx context.Context, mgmtCtx *config.ScaledContext, userMGR user.
 		UserMGR:            userMGR,
 		TokenMGR:           tokenMGR,
 		OrganizationClient: mgmtCtx.Wrangler.Mgmt.Organization(),
+		OrganizationCache:  mgmtCtx.Wrangler.Mgmt.Organization().Cache(),
 	}
 }
 
@@ -462,23 +463,39 @@ func (o *OpenIDCProvider) getUserInfoFromAuthCode(ctx *context.Context, config *
 		return userInfo, oauth2Token, fmt.Errorf("failed to parse groups claims: %w", err)
 	}
 	if config.OrganizationJSONPath != "" {
-		org, ok := getNestedValue(mapClaims, config.OrganizationJSONPath)
-		if !ok {
-			return userInfo, oauth2Token, fmt.Errorf("failed to parse org")
-		}
-		if org == "" {
-			return userInfo, oauth2Token, fmt.Errorf("org is empty")
-		} else {
-			// TODO check with cache if it does not exist
-			_, err := o.OrganizationClient.Create(&v32.Organization{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: org,
-				},
-			})
-			if err != nil && !apierrors.IsAlreadyExists(err) {
-				return nil, nil, err
+		if config.Type == "keyCloakOIDCConfig" {
+			orgs, ok := mapClaims["organization"].(map[string]interface{})
+			if ok {
+				for org, value := range orgs {
+					valueMap := value.(map[string]interface{})
+					_, err := o.OrganizationClient.Create(&v32.Organization{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: org,
+						},
+						ID: valueMap["id"].(string),
+					})
+					if err != nil && !apierrors.IsAlreadyExists(err) {
+						return nil, nil, err
+					}
+					claimInfo.Org = org
+				}
 			}
-			claimInfo.Org = org
+		} else {
+			org, ok := getNestedValue(mapClaims, config.OrganizationJSONPath)
+			if !ok {
+				// TODO? return userInfo, oauth2Token, fmt.Errorf("failed to parse org")
+			} else {
+				// TODO check with cache if it does not exist
+				_, err := o.OrganizationClient.Create(&v32.Organization{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: org,
+					},
+				})
+				if err != nil && !apierrors.IsAlreadyExists(err) {
+					return nil, nil, err
+				}
+				claimInfo.Org = org
+			}
 		}
 	}
 
@@ -733,14 +750,7 @@ func getNestedValue(data interface{}, path string) (string, bool) {
 	}
 	currentStr, ok := current.(string)
 	if !ok {
-		currentMap, ok := current.(map[string]interface{})
-		if !ok {
-			return "", false
-		}
-		for key := range currentMap {
-			// TODO warn or error if more than one found?
-			return key, true
-		}
+		return "", false
 	}
 
 	return currentStr, true

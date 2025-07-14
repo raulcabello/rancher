@@ -664,7 +664,7 @@ type OrganizationList struct {
 }
 
 func NewOrganization(namespace, name string, obj Organization) *Organization {
-	obj.APIVersion, obj.Kind = SchemeGroupVersion.WithKind("Org").ToAPIVersionAndKind()
+	obj.APIVersion, obj.Kind = SchemeGroupVersion.WithKind("Organization").ToAPIVersionAndKind()
 	obj.Name = name
 	obj.Namespace = namespace
 	return &obj
