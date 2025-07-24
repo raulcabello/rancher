@@ -4,10 +4,10 @@ package passwordchangerequest
 import (
 	"context"
 	"fmt"
+	"github.com/rancher/rancher/pkg/auth/providers/local/password"
 	"unicode/utf8"
 
 	ext "github.com/rancher/rancher/pkg/apis/ext.cattle.io/v1"
-	"github.com/rancher/rancher/pkg/auth/providers/local/pbkdf2"
 	"github.com/rancher/rancher/pkg/controllers/status"
 	v3 "github.com/rancher/rancher/pkg/generated/norman/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/settings"

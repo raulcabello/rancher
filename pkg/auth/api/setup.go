@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"github.com/rancher/rancher/pkg/auth/providers/local/password"
 	"net/http"
 
 	normanapi "github.com/rancher/norman/api"
@@ -13,7 +14,6 @@ import (
 	"github.com/rancher/rancher/pkg/auth/principals"
 	"github.com/rancher/rancher/pkg/auth/providerrefresh"
 	"github.com/rancher/rancher/pkg/auth/providers"
-	"github.com/rancher/rancher/pkg/auth/providers/local/pbkdf2"
 	"github.com/rancher/rancher/pkg/auth/requests"
 	client "github.com/rancher/rancher/pkg/client/generated/management/v3"
 	exttokenstore "github.com/rancher/rancher/pkg/ext/stores/tokens"

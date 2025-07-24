@@ -3,10 +3,10 @@ package management
 import (
 	"context"
 	"fmt"
+	"github.com/rancher/rancher/pkg/auth/providers/local/password"
 	"sync"
 
 	v3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
-	"github.com/rancher/rancher/pkg/auth/providers/local/pbkdf2"
 	"github.com/rancher/rancher/pkg/features"
 	"github.com/rancher/rancher/pkg/settings"
 	"github.com/rancher/rancher/pkg/types/config"

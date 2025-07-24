@@ -3,12 +3,12 @@ package management
 import (
 	"context"
 	"fmt"
+	"github.com/rancher/rancher/pkg/auth/providers/local/password"
 	"os"
 
 	"github.com/docker/docker/pkg/reexec"
 	"github.com/pkg/errors"
 	"github.com/rancher/norman/httperror"
-	"github.com/rancher/rancher/pkg/auth/providers/local/pbkdf2"
 	mgmtcontrollers "github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io/v3"
 	v3 "github.com/rancher/rancher/pkg/generated/norman/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/wrangler"

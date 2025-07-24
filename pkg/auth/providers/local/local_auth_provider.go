@@ -3,6 +3,7 @@ package local
 import (
 	"context"
 	"fmt"
+	"github.com/rancher/rancher/pkg/auth/providers/local/password"
 	"strings"
 	"unicode"
 
@@ -12,7 +13,6 @@ import (
 	v32 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/auth/accessor"
 	"github.com/rancher/rancher/pkg/auth/providers/common"
-	"github.com/rancher/rancher/pkg/auth/providers/local/pbkdf2"
 	"github.com/rancher/rancher/pkg/auth/tokens"
 	v3 "github.com/rancher/rancher/pkg/generated/norman/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/types/config"

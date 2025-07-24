@@ -2,6 +2,7 @@ package user
 
 import (
 	"fmt"
+	"github.com/rancher/rancher/pkg/auth/providers/local/password"
 	"strings"
 	"sync"
 	"time"
@@ -10,7 +11,6 @@ import (
 	"github.com/rancher/norman/httperror"
 	"github.com/rancher/norman/store/transform"
 	"github.com/rancher/norman/types"
-	"github.com/rancher/rancher/pkg/auth/providers/local/pbkdf2"
 	client "github.com/rancher/rancher/pkg/client/generated/management/v3"
 	v3 "github.com/rancher/rancher/pkg/generated/norman/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/settings"

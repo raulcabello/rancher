@@ -1,7 +1,6 @@
 package password
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"github.com/rancher/rancher/pkg/auth/providers/local/password/pbkdf2"
@@ -23,15 +22,16 @@ const (
 	bcryptHash                  = "bcrypt"
 )
 
-type PasswordHasher interface {
+type Hasher interface {
 	Hash(password string) ([]byte, []byte, error)
+	Verify(passwordToValidate string, passwordHashed []byte, salt []byte) (bool, error)
 }
 
 // Manager handles password storage and hashing using PBKDF2.
 type Manager struct {
 	secretLister v1.SecretCache
 	secretClient v1.SecretClient
-	hasher       PasswordHasher
+	hasher       Hasher
 }
 
 func New(secretLister v1.SecretCache, secretClient v1.SecretClient) *Manager {
@@ -119,8 +119,8 @@ func (p *Manager) VerifyAndUpdatePassword(userId string, currentPassword, newPas
 		return fmt.Errorf("failed to get password secret: %w", err)
 	}
 
-	hashedPassword, err := p.hashKey(currentPassword, secret.Data["salt"], pbkdf2.iterations, pbkdf2.keyLength)
-	if !bytes.Equal(hashedPassword, secret.Data["password"]) {
+	verified, err := p.hasher.Verify(currentPassword, secret.Data["password"], secret.Data["salt"])
+	if !verified {
 		return fmt.Errorf("invalid current password")
 	}
 
@@ -145,11 +145,11 @@ func (p *Manager) VerifyPassword(user *v3.User, password string) error {
 
 	switch secret.Annotations[passwordHashAnnotation] {
 	case pbkdf2sha3512Hash:
-		hashedPassword, err := p.hashKey(password, secret.Data["salt"], pbkdf2.iterations, pbkdf2.keyLength)
+		verified, err := p.hasher.Verify(password, secret.Data["password"], secret.Data["salt"])
 		if err != nil {
 			return fmt.Errorf("failed to hash password: %w", err)
 		}
-		if !bytes.Equal(hashedPassword, secret.Data["password"]) {
+		if !verified {
 			return fmt.Errorf("invalid password")
 		}
 		return nil

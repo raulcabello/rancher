@@ -1,6 +1,7 @@
 package pbkdf2
 
 import (
+	"bytes"
 	"crypto/pbkdf2"
 	"crypto/rand"
 	"crypto/sha3"
@@ -13,6 +14,10 @@ const (
 )
 
 type Hasher struct{}
+
+func NewHasher() *Hasher {
+	return &Hasher{}
+}
 
 func (h *Hasher) Hash(password string) ([]byte, []byte, error) {
 	salt := make([]byte, 32)
@@ -29,11 +34,11 @@ func (h *Hasher) Hash(password string) ([]byte, []byte, error) {
 	return passwordHashed, salt, nil
 }
 
-func (h *Hasher) Verify(password string, salt []byte) ([]byte, []byte, error) {
-	passwordHashed, err := pbkdf2.Key(sha3.New512, password, salt, iterations, keyLength)
+func (h *Hasher) Verify(passwordToValidate string, passwordHashed []byte, salt []byte) (bool, error) {
+	passwordToValidateHashed, err := pbkdf2.Key(sha3.New512, passwordToValidate, salt, iterations, keyLength)
 	if err != nil {
-		return nil, nil, err
+		return false, err
 	}
 
-	return passwordHashed, salt, nil
+	return bytes.Equal(passwordToValidateHashed, passwordHashed), nil
 }
