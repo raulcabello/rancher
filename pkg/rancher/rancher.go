@@ -398,7 +398,7 @@ func getSQLCacheGCValues(wranglerContext *wrangler.Context) (time.Duration, int)
 func (r *Rancher) Start(ctx context.Context) error {
 	// ensure namespace for storing local users password is created
 	if _, err := r.Wrangler.Core.Namespace().Create(&v1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{Name: pbkdf2.LocalUserPasswordsNamespace},
+		ObjectMeta: metav1.ObjectMeta{Name: password.LocalUserPasswordsNamespace},
 	}); err != nil && !apierrors.IsAlreadyExists(err) {
 		return err
 	}

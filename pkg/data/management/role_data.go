@@ -53,7 +53,7 @@ func addRoles(wrangler *wrangler.Context, management *config.ManagementContext) 
 	rb.addRole("Manage Cluster Drivers", "kontainerdrivers-manage").
 		addRule().apiGroups("management.cattle.io").resources("kontainerdrivers").verbs("*")
 	rb.addRole("Manage Users", "users-manage").
-		addNamespacedRule(pbkdf2.LocalUserPasswordsNamespace).addRule().apiGroups("").resources("secrets").verbs("create").
+		addNamespacedRule(password.LocalUserPasswordsNamespace).addRule().apiGroups("").resources("secrets").verbs("create").
 		addRule().apiGroups("ext.cattle.io").resources("groupmembershiprefreshrequests").verbs("create").
 		addRule().apiGroups("management.cattle.io").resources("users", "globalrolebindings").verbs("*").
 		addRule().apiGroups("management.cattle.io").resources("globalroles").verbs("get", "list", "watch")
@@ -468,7 +468,7 @@ func BootstrapAdmin(management *wrangler.Context) (string, error) {
 			return "", fmt.Errorf("can not ensure admin user exists: %w", err)
 		}
 		if err == nil {
-			pwdCreator := pbkdf2.New(management.Core.Secret().Cache(), management.Core.Secret())
+			pwdCreator := password.New(management.Core.Secret().Cache(), management.Core.Secret())
 			err = pwdCreator.CreatePassword(admin, bootstrapPassword)
 			if err != nil {
 				return "", fmt.Errorf("failed to create secret password: %w", err)

@@ -75,7 +75,7 @@ func resetPassword() {
 			return err
 		}
 
-		pwdCreator := pbkdf2.New(wranglerContext.Core.Secret().Cache(), wranglerContext.Core.Secret())
+		pwdCreator := password.New(wranglerContext.Core.Secret().Cache(), wranglerContext.Core.Secret())
 		if err := pwdCreator.CreatePassword(&admin, string(pass)); err != nil {
 			return errors.Errorf("couldn't create password %v", err)
 		}

@@ -56,7 +56,7 @@ type Store struct {
 // New is a convenience function for creating a password change request
 // store. It initializes the returned store from the provided wrangler context.
 func New(wranglerContext *wrangler.Context, authorizer authorizer.Authorizer) *Store {
-	pwdManager := pbkdf2.New(wranglerContext.Core.Secret().Cache(), wranglerContext.Core.Secret())
+	pwdManager := password.New(wranglerContext.Core.Secret().Cache(), wranglerContext.Core.Secret())
 
 	store := Store{
 		pwdUpdater: pwdManager,
@@ -190,7 +190,7 @@ func (s *Store) canUpdateAnyPassword(ctx context.Context, userInfo user.Info) (b
 	decision, _, err = s.authorizer.Authorize(ctx, &authorizer.AttributesRecord{
 		User:            userInfo,
 		Verb:            "update",
-		Namespace:       pbkdf2.LocalUserPasswordsNamespace,
+		Namespace:       password.LocalUserPasswordsNamespace,
 		APIVersion:      "v1",
 		Resource:        "secrets",
 		ResourceRequest: true,

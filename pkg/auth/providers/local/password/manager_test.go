@@ -1,4 +1,4 @@
-package pbkdf2
+package password
 
 import (
 	"encoding/json"
@@ -165,7 +165,7 @@ func TestCreatePassword(t *testing.T) {
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			p := Pbkdf2{
+			p := Manager{
 				secretClient:  test.mockSecretClient(),
 				hashKey:       test.mockHashKey,
 				saltGenerator: test.mockSaltGenerator,
@@ -332,7 +332,7 @@ func TestUpdatePassword(t *testing.T) {
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			p := Pbkdf2{
+			p := Manager{
 				secretClient:  test.mockSecretClient(),
 				secretLister:  test.mockSecretCache(),
 				hashKey:       test.mockHashKey,
@@ -520,7 +520,7 @@ func TestVerifyAndUpdatePassword(t *testing.T) {
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			p := Pbkdf2{
+			p := Manager{
 				secretClient:  test.mockSecretClient(),
 				secretLister:  test.mockSecretCache(),
 				hashKey:       test.mockHashKey,
@@ -752,7 +752,7 @@ func TestVerifyPassword(t *testing.T) {
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			p := Pbkdf2{
+			p := Manager{
 				secretLister:  test.mockSecretCache(),
 				secretClient:  test.mockSecretClient(),
 				hashKey:       test.mockHashKey,

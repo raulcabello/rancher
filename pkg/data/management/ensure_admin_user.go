@@ -120,7 +120,7 @@ func createNewAdmin(client v3.Interface, length int, secretLister wranglerv1.Sec
 		return err
 	}
 
-	pwdCreator := pbkdf2.New(secretLister, secretClient)
+	pwdCreator := password.New(secretLister, secretClient)
 	if err := pwdCreator.CreatePassword(admin, string(pass)); err != nil {
 		return httperror.NewAPIError(httperror.InvalidBodyContent, err.Error())
 	}

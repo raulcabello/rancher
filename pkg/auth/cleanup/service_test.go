@@ -281,7 +281,7 @@ func newMockCleanupService(t *testing.T,
 
 	// Setup SecretsCache mock client
 	secretsCache := fake.NewMockCacheInterface[*corev1.Secret](ctrl)
-	secretsCache.EXPECT().Get(pbkdf2.LocalUserPasswordsNamespace, gomock.Any()).Return(nil, apierrors.NewNotFound(schema.GroupResource{
+	secretsCache.EXPECT().Get(password.LocalUserPasswordsNamespace, gomock.Any()).Return(nil, apierrors.NewNotFound(schema.GroupResource{
 		Group:    v1.SchemeGroupVersion.Group,
 		Resource: "secrets",
 	}, "")).AnyTimes()

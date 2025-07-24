@@ -55,7 +55,7 @@ func SetUserStore(schema *types.Schema, mgmt *config.ScaledContext) {
 		userManager:  mgmt.UserManager,
 		secretClient: mgmt.Wrangler.Core.Secret(),
 		secretLister: mgmt.Wrangler.Core.Secret().Cache(),
-		pwdCreator:   pbkdf2.New(mgmt.Wrangler.Core.Secret().Cache(), mgmt.Wrangler.Core.Secret()),
+		pwdCreator:   password.New(mgmt.Wrangler.Core.Secret().Cache(), mgmt.Wrangler.Core.Secret()),
 	}
 
 	t := &transform.Store{

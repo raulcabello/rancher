@@ -1,12 +1,10 @@
-package pbkdf2
+package password
 
 import (
 	"bytes"
-	"crypto/pbkdf2"
-	"crypto/rand"
-	"crypto/sha3"
 	"encoding/json"
 	"fmt"
+	"github.com/rancher/rancher/pkg/auth/providers/local/password/pbkdf2"
 
 	v3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	"github.com/rancher/wrangler/v3/pkg/generated/controllers/core/v1"
@@ -20,37 +18,33 @@ import (
 
 const (
 	LocalUserPasswordsNamespace = "cattle-local-user-passwords"
-	iterations                  = 210000
-	keyLength                   = 32
 	passwordHashAnnotation      = "cattle.io/password-hash"
 	pbkdf2sha3512Hash           = "pbkdf2sha3512"
 	bcryptHash                  = "bcrypt"
 )
 
-// Pbkdf2 handles password storage and hashing using PBKDF2.
-type Pbkdf2 struct {
-	secretLister  v1.SecretCache
-	secretClient  v1.SecretClient
-	hashKey       func(password string, salt []byte, iter, keyLength int) ([]byte, error)
-	saltGenerator func() ([]byte, error)
+type PasswordHasher interface {
+	Hash(password string) ([]byte, []byte, error)
 }
 
-func New(secretLister v1.SecretCache, secretClient v1.SecretClient) *Pbkdf2 {
-	return &Pbkdf2{
-		secretLister:  secretLister,
-		secretClient:  secretClient,
-		hashKey:       sha3512Key,
-		saltGenerator: generateSalt,
+// Manager handles password storage and hashing using PBKDF2.
+type Manager struct {
+	secretLister v1.SecretCache
+	secretClient v1.SecretClient
+	hasher       PasswordHasher
+}
+
+func New(secretLister v1.SecretCache, secretClient v1.SecretClient) *Manager {
+	return &Manager{
+		secretLister: secretLister,
+		secretClient: secretClient,
+		hasher:       &pbkdf2.Hasher{},
 	}
 }
 
 // CreatePassword hashes the provided password using PBKDF2 and stores it in a secret associated with the specified user.
-func (p *Pbkdf2) CreatePassword(user *v3.User, password string) error {
-	salt, err := p.saltGenerator()
-	if err != nil {
-		return fmt.Errorf("failed to generate salt: %w", err)
-	}
-	hashedPassword, err := p.hashKey(password, salt, iterations, keyLength)
+func (p *Manager) CreatePassword(user *v3.User, password string) error {
+	hashedPassword, salt, err := p.hasher.Hash(password)
 	if err != nil {
 		return fmt.Errorf("failed to hash password: %w", err)
 	}
@@ -84,17 +78,12 @@ func (p *Pbkdf2) CreatePassword(user *v3.User, password string) error {
 }
 
 // UpdatePassword hashes the provided password using PBKDF2 and updates the secret associated with the specified user
-func (p *Pbkdf2) UpdatePassword(userId string, newPassword string) error {
+func (p *Manager) UpdatePassword(userId string, newPassword string) error {
 	secret, err := p.secretLister.Get(LocalUserPasswordsNamespace, userId)
 	if err != nil {
 		return fmt.Errorf("failed to get password secret: %w", err)
 	}
-	salt, err := p.saltGenerator()
-	if err != nil {
-		return fmt.Errorf("failed to generate salt: %w", err)
-	}
-
-	hashedNewPassword, err := p.hashKey(newPassword, salt, iterations, keyLength)
+	hashedNewPassword, salt, err := p.hasher.Hash(newPassword)
 	if err != nil {
 		return fmt.Errorf("failed to hash password: %w", err)
 	}
@@ -124,13 +113,13 @@ func (p *Pbkdf2) UpdatePassword(userId string, newPassword string) error {
 
 // VerifyAndUpdatePassword hashes the provided password using PBKDF2 and updates the secret associated with the specified user
 // if the currentPassword matches the password stored.
-func (p *Pbkdf2) VerifyAndUpdatePassword(userId string, currentPassword, newPassword string) error {
+func (p *Manager) VerifyAndUpdatePassword(userId string, currentPassword, newPassword string) error {
 	secret, err := p.secretLister.Get(LocalUserPasswordsNamespace, userId)
 	if err != nil {
 		return fmt.Errorf("failed to get password secret: %w", err)
 	}
 
-	hashedPassword, err := p.hashKey(currentPassword, secret.Data["salt"], iterations, keyLength)
+	hashedPassword, err := p.hashKey(currentPassword, secret.Data["salt"], pbkdf2.iterations, pbkdf2.keyLength)
 	if !bytes.Equal(hashedPassword, secret.Data["password"]) {
 		return fmt.Errorf("invalid current password")
 	}
@@ -140,7 +129,7 @@ func (p *Pbkdf2) VerifyAndUpdatePassword(userId string, currentPassword, newPass
 
 // VerifyPassword verifies if the password stored is the same as the password provided.
 // if the password stored is using the legacy hashing algorithm (bcrypt) it will be updated to PBKDF2.
-func (p *Pbkdf2) VerifyPassword(user *v3.User, password string) error {
+func (p *Manager) VerifyPassword(user *v3.User, password string) error {
 	secret, err := p.secretLister.Get(LocalUserPasswordsNamespace, user.Name)
 	if err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("failed to get password secret: %w", err)
@@ -156,7 +145,7 @@ func (p *Pbkdf2) VerifyPassword(user *v3.User, password string) error {
 
 	switch secret.Annotations[passwordHashAnnotation] {
 	case pbkdf2sha3512Hash:
-		hashedPassword, err := p.hashKey(password, secret.Data["salt"], iterations, keyLength)
+		hashedPassword, err := p.hashKey(password, secret.Data["salt"], pbkdf2.iterations, pbkdf2.keyLength)
 		if err != nil {
 			return fmt.Errorf("failed to hash password: %w", err)
 		}
@@ -169,11 +158,7 @@ func (p *Pbkdf2) VerifyPassword(user *v3.User, password string) error {
 			return err
 		}
 		// migrate password to pkbf2 hashing algorithm
-		salt, err := p.saltGenerator()
-		if err != nil {
-			return fmt.Errorf("failed to generate salt: %w", err)
-		}
-		hashedNewPassword, err := p.hashKey(password, salt, iterations, keyLength)
+		hashedNewPassword, salt, err := p.hasher.Hash(password)
 		if err != nil {
 			return fmt.Errorf("failed to hash password: %w", err)
 		}
@@ -209,18 +194,4 @@ func (p *Pbkdf2) VerifyPassword(user *v3.User, password string) error {
 	default:
 		return fmt.Errorf("unsupported hashing algorithm")
 	}
-}
-
-func sha3512Key(password string, salt []byte, iter, keyLength int) ([]byte, error) {
-	return pbkdf2.Key(sha3.New512, password, salt, iter, keyLength)
-}
-
-func generateSalt() ([]byte, error) {
-	salt := make([]byte, 32)
-	_, err := rand.Read(salt)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate salt: %w", err)
-	}
-
-	return salt, nil
 }

@@ -39,7 +39,7 @@ func User(ctx context.Context, schemas *types.Schemas, management *config.Scaled
 		ExtTokenStore:            extTokenStore,
 		SecretLister:             management.Wrangler.Core.Secret().Cache(),
 		SecretClient:             management.Wrangler.Core.Secret(),
-		PwdChanger:               pbkdf2.New(management.Wrangler.Core.Secret().Cache(), management.Wrangler.Core.Secret()),
+		PwdChanger:               password.New(management.Wrangler.Core.Secret().Cache(), management.Wrangler.Core.Secret()),
 	}
 
 	schema.Formatter = handler.UserFormatter

@@ -176,7 +176,7 @@ func (s *Service) deleteUsers(config *v3.AuthConfig) error {
 		providerName := getProviderNameFromPrincipalNames(u.PrincipalIDs...)
 		if providerName == config.Name {
 			// A fully external user (who was never local) has no password.
-			_, err := s.secretsCache.Get(pbkdf2.LocalUserPasswordsNamespace, u.Name)
+			_, err := s.secretsCache.Get(password.LocalUserPasswordsNamespace, u.Name)
 			if err != nil && !apierrors.IsNotFound(err) {
 				return fmt.Errorf("failed to get user secret: %w", err)
 			}
